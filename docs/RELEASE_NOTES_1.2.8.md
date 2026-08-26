@@ -37,4 +37,4 @@ ad234603b8d3423db2f6d027beb2d32850dd0a3944a9c33a7d9a832bd3393703
 ## 开源与署名
 
 项目使用 MIT License。上游关系和主题生态许可边界见
-[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。
+[`THIRD_PARTY_NOTICES.md`](https://github.com/staklab/codex-box/blob/main/THIRD_PARTY_NOTICES.md)。
