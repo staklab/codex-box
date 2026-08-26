@@ -52,6 +52,13 @@
 - 已安装官方 Codex Desktop（当前应用路径通常为 `/Applications/ChatGPT.app`）
 - Xcode（本地构建）
 
+## 平台支持
+
+当前只提供 **macOS 版本**，GitHub Release 仅发布 macOS DMG。
+暂不提供 Windows 或 Linux 版本。
+
+下载：[v1.2.8 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.8)
+
 ## 本地构建
 
 Swift 6.3.3 优化器会在当前代码的特定 `deinit` 路径崩溃，因此构建必须显式使用

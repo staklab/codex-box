@@ -28,6 +28,14 @@ Codex Desktop app without rewriting its shared OAuth credentials.
 - Theme assets may have per-theme licenses. Runtime catalog access does not
   grant redistribution rights.
 
+## Platform support
+
+The current release is **macOS-only** and requires macOS 13 or later. GitHub
+Releases provide a macOS DMG. Windows and Linux builds are not currently
+available.
+
+Download: [v1.2.8 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.8)
+
 ## Build
 
 The current Swift 6.3.3 optimizer crashes on a project `deinit` path, so Release
