@@ -1,0 +1,69 @@
+# Xcode
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+xcuserdata/
+*.xcscmblueprint
+*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# Build
+build/
+DerivedData/
+dist/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+*.resolved
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Local agent state / release artifacts
+.omx/
+.ufoo/
+.playwright-cli/
+output/
+tools/.bin/
+tools/.*-dev.css
+*.orig
+
+# Local handoff / agent state
+.codex/
+PROJECT_REPORT.md
+HANDOFF_PROMPT.md
+git_updates.md
+
+# Upstream marketing drafts retained locally until rebranded
+marketing/
+docs/assets/
+docs/codex-plans/
+docs/plans/
+docs/superpowers/
+docs/update-feed-rollout.md
+
+# Sensitive
+*.p12
+*.mobileprovision
+*.provisionprofile

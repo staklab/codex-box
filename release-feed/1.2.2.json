@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "release": {
+    "version": "1.2.2",
+    "publishedAt": "2026-05-06T08:49:06Z",
+    "summary": "版本 1.2.2 发布",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.2",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.2",
+    "deliveryMode": "guidedDownload",
+    "minimumAutomaticUpdateVersion": "1.1.6",
+    "artifacts": [
+      {
+        "architecture": "universal",
+        "format": "dmg",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.2/codex-box-1.2.2-macOS.dmg",
+        "sha256": "d36d83e70711e6f50fbb51d673c3574549250c1624f20356eed95590b0f13e1b"
+      },
+      {
+        "architecture": "universal",
+        "format": "zip",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.2/codex-box-1.2.2-macOS.zip",
+        "sha256": "dc9d4cb60b340b17e222af8b21570786efc7fa5a5c38ec1c446e389508d51dd0"
+      }
+    ]
+  }
+}

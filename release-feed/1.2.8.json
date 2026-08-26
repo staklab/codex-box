@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "release": {
+    "version": "1.2.8",
+    "publishedAt": "2026-07-17T09:39:56Z",
+    "summary": "本地成本账本、动态额度窗口与紧凑菜单栏显示升级",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.8",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.8",
+    "deliveryMode": "guidedDownload",
+    "minimumAutomaticUpdateVersion": "1.1.6",
+    "artifacts": [
+      {
+        "architecture": "arm64",
+        "format": "dmg",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.8/codex-box-1.2.8-macOS.dmg",
+        "sha256": "f34fa629fd2c4684c79d558d67e65532b5ef1408d4cdc3cde22869eee9486e42"
+      },
+      {
+        "architecture": "arm64",
+        "format": "zip",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.8/codex-box-1.2.8-macOS.zip",
+        "sha256": "e694d051f390d5c30243d8f6a0bba4de38a7abea7ad28d9f4fba203efab84729"
+      }
+    ]
+  }
+}
