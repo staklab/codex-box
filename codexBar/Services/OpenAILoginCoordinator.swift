@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import Foundation
 import SwiftUI
 
@@ -210,11 +211,29 @@ final class OpenAILoginCoordinator {
 enum CodexBarURLRouter {
     /// 预览页回调用的 scheme：codex-box://apply?id=xxx&wallpaper=1
     static let appURLScheme = "codexbox"
+    static let dreamSkinURLScheme = "dreamskin"
+
+    /// 只在用户从 codex-box 主动打开 DreamSkin 时声明默认处理器。
+    /// 这样可避开系统里 Codex++ 等旧工具对同一 scheme 的竞争，也不会在应用启动时
+    /// 无条件抢走用户为其它 DreamSkin 客户端设置的关联。
+    @discardableResult
+    static func claimDreamSkinURLScheme() -> Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return false }
+        return LSSetDefaultHandlerForURLScheme(
+            Self.dreamSkinURLScheme as CFString,
+            bundleIdentifier as CFString
+        ) == noErr
+    }
 
     @MainActor
     static func handle(_ url: URL) {
         if url.scheme?.caseInsensitiveCompare(Self.appURLScheme) == .orderedSame {
             self.handleAppCommand(url)
+            return
+        }
+
+        if url.scheme?.caseInsensitiveCompare(Self.dreamSkinURLScheme) == .orderedSame {
+            self.handleDreamSkinCommand(url)
             return
         }
 
@@ -279,6 +298,44 @@ enum CodexBarURLRouter {
                     name: .codexbarThemeApplyDidFinish,
                     object: nil,
                     userInfo: ["message": message]
+                )
+            } catch {
+                NotificationCenter.default.post(
+                    name: .codexbarThemeApplyDidFinish,
+                    object: nil,
+                    userInfo: ["message": error.localizedDescription]
+                )
+            }
+        }
+    }
+
+    /// 兼容 dreamskin.cc 画廊的“一键换肤”：
+    /// `dreamskin://apply?version=ver_...`。
+    /// 下载地址固定在 DreamSkin 官方 API，且详情声明支持 macOS 后才会安装。
+    @MainActor
+    private static func handleDreamSkinCommand(_ url: URL) {
+        let action = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
+        guard action == "apply" else { return }
+
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        guard let versionID = components?.queryItems?
+            .first(where: { $0.name == "version" })?.value,
+            versionID.isEmpty == false else { return }
+
+        Task { @MainActor in
+            do {
+                let themeService = CodexThemeService.shared
+                let listing = try await themeService.fetchDreamSkinListing(versionID: versionID)
+                _ = try await themeService.install(listing)
+                try themeService.applyNativeColors(themeID: listing.id)
+
+                let injection = CodexSkinInjectionService.shared
+                _ = try await injection.launchCodexWithDebugging()
+                try await injection.injectSkin(themeID: listing.id, themeService: themeService)
+                NotificationCenter.default.post(
+                    name: .codexbarThemeApplyDidFinish,
+                    object: nil,
+                    userInfo: ["message": "已从 DreamSkin 安装并应用「\(listing.name)」（Codex 已重启并注入）。"]
                 )
             } catch {
                 NotificationCenter.default.post(

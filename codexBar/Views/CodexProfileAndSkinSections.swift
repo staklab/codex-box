@@ -175,8 +175,7 @@ struct CodexSkinSectionView: View {
                     Image(systemName: "eye")
                 }
                 .buttonStyle(.borderless)
-                .disabled(self.themeService.state.installed.isEmpty && self.themeService.listings.isEmpty)
-                .help("在浏览器中预览：已安装的 + 市场里可下载的")
+                .help("打开 DreamSkin 官方主题库")
 
                 Button {
                     Task { await self.refreshMarket() }
@@ -198,7 +197,7 @@ struct CodexSkinSectionView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Spacer(minLength: 0)
-                    Button("打开主题库") { Task { await self.openPreview() } }
+                    Button("打开 DreamSkin") { Task { await self.openPreview() } }
                         .buttonStyle(.borderless)
                         .font(.caption2)
                 }
@@ -295,12 +294,12 @@ struct CodexSkinSectionView: View {
     private func openPreview() async {
         self.isBusy = true
         defer { self.isBusy = false }
-        do {
-            try await CodexThemePreviewService.generateAndOpen(themeService: self.themeService)
-            self.message = "预览已在浏览器中打开。"
-        } catch {
-            self.message = error.localizedDescription
-        }
+        guard let url = URL(string: "https://dreamskin.cc/gallery") else { return }
+        let claimed = CodexBarURLRouter.claimDreamSkinURLScheme()
+        NSWorkspace.shared.open(url)
+        self.message = claimed
+            ? "DreamSkin 主题库已打开；点“一键换肤”即可交给 codex-box 安装并注入。"
+            : "DreamSkin 主题库已打开；系统未能把“一键换肤”关联到 codex-box。"
     }
 
     private func refreshMarket() async {

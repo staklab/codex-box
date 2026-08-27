@@ -183,6 +183,7 @@ struct CodexThemeInstallState: Codable {
 enum CodexThemeError: LocalizedError {
     case badIndex
     case themeNotFound(String)
+    case unsupportedPlatform(String)
     case downloadFailed(String)
     case integrityMismatch(String)
     case configMissing
@@ -193,6 +194,8 @@ enum CodexThemeError: LocalizedError {
             return "皮肤市场索引解析失败"
         case .themeNotFound(let id):
             return "市场中没有这个主题：\(id)"
+        case .unsupportedPlatform(let id):
+            return "主题 \(id) 不支持 macOS"
         case .downloadFailed(let detail):
             return "下载失败：\(detail)"
         case .integrityMismatch(let id):
@@ -230,6 +233,7 @@ struct CodexDreamSkinPage: Codable {
         struct DisplayMeta: Codable {
             var colors: CodexThemeDefinition.Colors?
             var appearance: String?
+            var platforms: [String]?
         }
 
         let id: String
@@ -446,34 +450,72 @@ final class CodexThemeService: ObservableObject {
                 throw CodexThemeError.badIndex
             }
 
-            for item in page.items {
-                collected.append(
-                    CodexThemeListing(
-                        id: item.themeId ?? item.id,
-                        name: item.name,
-                        version: item.version ?? "1.0.0",
-                        author: item.authorDisplayName,
-                        description: item.downloadCount.map { "下载 \($0) 次" },
-                        license: item.license,
-                        sourceUrl: "https://dreamskin.cc/gallery",
-                        tags: item.displayMeta?.appearance.map { [$0] },
-                        theme: "/v1/themes/\(item.id)/download",
-                        image: nil,
-                        preview: "/v1/themes/\(item.id)/preview/thumbnail",
-                        sourceBaseURL: source.baseURL,
-                        sourceName: source.name,
-                        isPack: true,
-                        declaredSha256: item.packageSha256,
-                        inlineColors: item.displayMeta?.colors,
-                        inlineAppearance: item.displayMeta?.appearance
-                    )
-                )
-            }
+            collected.append(contentsOf: page.items.map {
+                self.dreamSkinListing(from: $0, source: source)
+            })
 
             offset += pageSize
             if offset >= page.total || page.items.isEmpty { break }
         }
         return collected
+    }
+
+    /// 处理 dreamskin.cc 网页的一键换肤回调。
+    /// 版本号只会被拼到固定的官方 API 地址，不能由 URL scheme 指定任意下载源。
+    func fetchDreamSkinListing(versionID: String) async throws -> CodexThemeListing {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        guard versionID.hasPrefix("ver_"),
+              versionID.unicodeScalars.allSatisfy(allowed.contains),
+              let url = URL(string: "https://api.dreamskin.cc/v1/themes/\(versionID)")
+        else { throw CodexThemeError.themeNotFound(versionID) }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await self.session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let item = try? JSONDecoder().decode(CodexDreamSkinPage.Item.self, from: data),
+              item.id == versionID
+        else { throw CodexThemeError.themeNotFound(versionID) }
+
+        if let platforms = item.displayMeta?.platforms,
+           platforms.contains(where: { $0.caseInsensitiveCompare("macos") == .orderedSame }) == false {
+            throw CodexThemeError.unsupportedPlatform(item.themeId ?? item.id)
+        }
+
+        let source = CodexThemeSource(
+            id: "dreamskin-cc",
+            name: "DreamSkin.cc（社区大库）",
+            baseURL: "https://api.dreamskin.cc",
+            enabled: true,
+            format: .dreamSkinAPI
+        )
+        return self.dreamSkinListing(from: item, source: source)
+    }
+
+    private func dreamSkinListing(
+        from item: CodexDreamSkinPage.Item,
+        source: CodexThemeSource
+    ) -> CodexThemeListing {
+        CodexThemeListing(
+            id: item.themeId ?? item.id,
+            name: item.name,
+            version: item.version ?? "1.0.0",
+            author: item.authorDisplayName,
+            description: item.downloadCount.map { "下载 \($0) 次" },
+            license: item.license,
+            sourceUrl: "https://dreamskin.cc/themes/\(item.id)",
+            tags: item.displayMeta?.appearance.map { [$0] },
+            theme: "/v1/themes/\(item.id)/download",
+            image: nil,
+            preview: "/v1/themes/\(item.id)/preview/thumbnail",
+            sourceBaseURL: source.baseURL,
+            sourceName: source.name,
+            isPack: true,
+            declaredSha256: item.packageSha256,
+            inlineColors: item.displayMeta?.colors,
+            inlineAppearance: item.displayMeta?.appearance
+        )
     }
 
     /// 本地皮肤库：`~/.codexbar/themes-local/<id>/{theme.json,image.*}`。

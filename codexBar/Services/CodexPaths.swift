@@ -69,6 +69,7 @@ enum CodexPaths {
     static var menuHostLeaseURL: URL { self.menuHostRootURL.appendingPathComponent("host.pid") }
 
     static var barConfigURL: URL { self.codexBarRoot.appendingPathComponent("config.json") }
+    static var desktopThreadPresetsURL: URL { self.codexBarRoot.appendingPathComponent("desktop-thread-presets.json") }
     static var costCacheURL: URL { self.codexBarRoot.appendingPathComponent("cost-cache.json") }
     static var costSessionCacheURL: URL { self.codexBarRoot.appendingPathComponent("cost-session-cache.json") }
     static var costEventLedgerURL: URL { self.codexBarRoot.appendingPathComponent("cost-event-ledger.json") }

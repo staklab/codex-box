@@ -79,6 +79,13 @@ final class CodexSkinPersistenceService: ObservableObject {
         guard NSWorkspace.shared.runningApplications
             .contains(where: { $0.bundleIdentifier == "com.openai.codex" }) else { return }
 
+        // codex-box 自身更新/重启时，Codex 很可能已经带调试端口运行。
+        // 此时只需热注入，绝不能再调用 launchCodexWithDebugging() 重启桌面端。
+        if await injection.hasLiveDebugTarget() {
+            try? await injection.injectSkin(themeID: themeID, themeService: themeService)
+            return
+        }
+
         try? await self.applyNow(themeID: themeID, themeService: themeService, injection: injection)
     }
 

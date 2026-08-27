@@ -57,7 +57,7 @@
 当前只提供 **macOS 版本**，GitHub Release 仅发布 macOS DMG。
 暂不提供 Windows 或 Linux 版本。
 
-下载：[v1.2.8 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.8)
+下载：[v1.2.9 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.9)
 
 ## 本地构建
 

@@ -29,6 +29,8 @@ final class CodexSkinInjectionService: ObservableObject {
 
     @Published private(set) var status: Status = .idle
 
+    private static let persistedDebugPortKey = "codexbox.skin.debugPort"
+
     /// 深色模式下主表面（对话区、卡片）的不透明度。
     static let darkSurfaceAlpha = 0.55
 
@@ -56,8 +58,23 @@ final class CodexSkinInjectionService: ObservableObject {
     private let session: URLSession
     private var debugPort: Int?
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        self.session = session ?? Self.makeLoopbackSession()
+        let persistedPort = UserDefaults.standard.integer(forKey: Self.persistedDebugPortKey)
+        self.debugPort = persistedPort > 0 ? persistedPort : nil
+    }
+
+    private static func makeLoopbackSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        // 系统代理可能会接管 127.0.0.1，表现为端口明明监听却无法读取 /json。
+        // CDP 只访问本机回环地址，明确关闭所有代理类型。
+        configuration.connectionProxyDictionary = [
+            "HTTPEnable": false,
+            "HTTPSEnable": false,
+            "SOCKSEnable": false,
+        ]
+        configuration.timeoutIntervalForRequest = 5
+        return URLSession(configuration: configuration)
     }
 
     // MARK: - 启动
@@ -84,6 +101,7 @@ final class CodexSkinInjectionService: ObservableObject {
 
         _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
         self.debugPort = port
+        UserDefaults.standard.set(port, forKey: Self.persistedDebugPortKey)
 
         // 等待调试端口就绪
         for _ in 0..<40 {
@@ -134,9 +152,78 @@ final class CodexSkinInjectionService: ObservableObject {
     /// 用来判断一个刚启动的 Codex 是不是由 codex-box 拉起的——
     /// 是的话就不必再接管重启。
     func hasLiveDebugTarget() async -> Bool {
+        if self.debugPort == nil {
+            self.debugPort = Self.discoverRunningDebugPort()
+        }
         guard let port = self.debugPort else { return false }
         let targets = try? await self.pageTargets(port: port)
-        return targets?.isEmpty == false
+        let isLive = targets?.isEmpty == false
+        if isLive == false {
+            self.debugPort = nil
+            UserDefaults.standard.removeObject(forKey: Self.persistedDebugPortKey)
+        }
+        return isLive
+    }
+
+    /// 返回 Codex 桌面主渲染页。线程控制与皮肤共用同一个受控 CDP 连接，
+    /// 不另启 app-server，也不接触认证文件。
+    func mainPageTarget() async throws -> CDPTarget {
+        if self.debugPort == nil {
+            self.debugPort = Self.discoverRunningDebugPort()
+        }
+        guard let port = self.debugPort else {
+            throw CodexThemeError.downloadFailed("Codex 未通过 codex-box 调试端口启动")
+        }
+        let targets = try await self.pageTargets(port: port)
+        guard let target = targets.first(where: {
+            $0.url == "app://-/index.html" || $0.url.hasSuffix("/index.html")
+        }) ?? targets.first else {
+            throw CodexThemeError.downloadFailed("找不到 Codex 桌面主窗口")
+        }
+        return target
+    }
+
+    /// 从正在监听的 ChatGPT/Codex 进程发现调试端口。
+    /// 这是对 UserDefaults 持久化端口的兜底，避免 codex-box 自身更新后误重启桌面端。
+    private static func discoverRunningDebugPort() -> Int? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-nP", "-iTCP", "-sTCP:LISTEN"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        for line in text.components(separatedBy: .newlines) where line.hasPrefix("ChatGPT") {
+            guard let range = line.range(of: #"127\.0\.0\.1:(\d+) \(LISTEN\)"#, options: .regularExpression) else {
+                continue
+            }
+            let matched = String(line[range])
+            guard let colon = matched.firstIndex(of: ":"),
+                  let space = matched[colon...].firstIndex(of: " "),
+                  let port = Int(matched[matched.index(after: colon)..<space]) else { continue }
+            UserDefaults.standard.set(port, forKey: Self.persistedDebugPortKey)
+            return port
+        }
+        return nil
+    }
+
+    func evaluateDesktop(javascript: String, awaitPromise: Bool = true) async throws -> Any? {
+        let target = try await self.mainPageTarget()
+        guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else {
+            throw CodexThemeError.downloadFailed("Codex 调试目标缺少 WebSocket 地址")
+        }
+        return try await self.evaluate(
+            javascript: javascript,
+            webSocketURL: wsURL,
+            awaitPromise: awaitPromise
+        )
     }
 
     func pageTargets(port: Int) async throws -> [CDPTarget] {
@@ -164,7 +251,11 @@ final class CodexSkinInjectionService: ObservableObject {
         let targets = try await self.pageTargets(port: port)
         for target in targets {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
-            try await self.evaluate(javascript: Self.installerJS(css: css), webSocketURL: wsURL)
+            _ = try await self.evaluate(
+                javascript: Self.installerJS(css: css),
+                webSocketURL: wsURL,
+                awaitPromise: false
+            )
         }
     }
 
@@ -177,7 +268,7 @@ final class CodexSkinInjectionService: ObservableObject {
         """
         for target in targets {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
-            try await self.evaluate(javascript: js, webSocketURL: wsURL)
+            _ = try await self.evaluate(javascript: js, webSocketURL: wsURL, awaitPromise: false)
         }
     }
 
@@ -394,7 +485,11 @@ final class CodexSkinInjectionService: ObservableObject {
     // MARK: - 最小 CDP 客户端
 
     /// 通过 WebSocket 发一条 `Runtime.evaluate`。只发不收业务数据，收到首个响应即断开。
-    private func evaluate(javascript: String, webSocketURL: URL) async throws {
+    private func evaluate(
+        javascript: String,
+        webSocketURL: URL,
+        awaitPromise: Bool
+    ) async throws -> Any? {
         let task = self.session.webSocketTask(with: webSocketURL)
         // 壁纸以 data URI 内联，一张 3MB 的图转 base64 后约 4MB，
         // 而 maximumMessageSize 默认只有 1MiB，不放宽的话整条消息会被直接丢弃。
@@ -407,14 +502,30 @@ final class CodexSkinInjectionService: ObservableObject {
             "method": "Runtime.evaluate",
             "params": [
                 "expression": javascript,
-                "awaitPromise": false,
+                "awaitPromise": awaitPromise,
                 "returnByValue": true,
             ],
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
-        guard let text = String(data: data, encoding: .utf8) else { return }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
 
         try await task.send(.string(text))
-        _ = try? await task.receive()
+        let message = try await task.receive()
+        guard case let .string(responseText) = message,
+              let responseData = responseText.data(using: .utf8),
+              let response = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        else { return nil }
+
+        if let error = response["error"] as? [String: Any] {
+            throw CodexThemeError.downloadFailed(error["message"] as? String ?? "CDP 执行失败")
+        }
+        guard let result = response["result"] as? [String: Any],
+              let inner = result["result"] as? [String: Any] else { return nil }
+        if let exception = result["exceptionDetails"] as? [String: Any] {
+            throw CodexThemeError.downloadFailed(
+                exception["text"] as? String ?? "Codex 页面脚本执行失败"
+            )
+        }
+        return inner["value"]
     }
 }

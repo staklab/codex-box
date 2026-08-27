@@ -22,6 +22,16 @@
 				<string>codexbox</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>dreamskin.compatible.apply</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dreamskin</string>
+			</array>
+		</dict>
 	</array>
 	<key>CodexBarGitHubReleasesURL</key>
 	<string>https://api.github.com/repos/staklab/codex-box/releases</string>

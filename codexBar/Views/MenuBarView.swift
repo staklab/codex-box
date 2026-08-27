@@ -541,11 +541,10 @@ struct MenuBarView: View {
     @StateObject private var skinInjectionService = CodexSkinInjectionService.shared
     @StateObject private var gatewayCoordinator = CodexGatewayCoordinator.shared
     @StateObject private var skinPersistence = CodexSkinPersistenceService.shared
+    @StateObject private var desktopThreadSettings = CodexDesktopThreadSettingsService.shared
 
     private let costPanelID = "cost-details-hover-panel"
     private let usageRefreshInterval = OpenAIUsagePollingService.defaultRefreshInterval
-    private let visibleOpenAIAccountLimit = 5
-    private let openAIAccountsInitialHeight: CGFloat = 260
     private let runningThreadAttributionService = OpenAIRunningThreadAttributionService()
     private let oauthAccountService = CodexBarOAuthAccountService()
     private let openAIAccountCSVService = OpenAIAccountCSVService()
@@ -557,7 +556,7 @@ struct MenuBarView: View {
         "gpt-5.6-terra",
         "gpt-5.6-luna",
     ]
-    private let serviceTierOptions = ["flex", "fast"]
+    private let serviceTierOptions = ["default", "flex", "fast"]
     private let contextWindowPresetOptions = CodexBarGlobalSettings.presetContextWindows
 
     @State private var isRefreshing = false
@@ -576,9 +575,6 @@ struct MenuBarView: View {
     @State private var costSummaryAnchorView: NSView?
     @State private var isProvidersExpanded = false
     @State private var lastOpenAIManualSwitchResult: OpenAIManualSwitchResult?
-    @State private var measuredMenuHeight: CGFloat = 0
-    @State private var openAIAccountsMeasuredHeight: CGFloat = 0
-    @State private var scrollableMenuBodyMeasuredHeight: CGFloat = 0
     @State private var statusItemAvailableContentHeight: CGFloat?
     @State private var countdownTimerConnection: Cancellable?
     @State private var runningThreadTimerConnection: Cancellable?
@@ -622,22 +618,6 @@ struct MenuBarView: View {
         self.store.openAIRuntimeRouteSnapshot(
             runningThreadAttribution: self.runningThreadAttribution,
             now: self.now
-        )
-    }
-
-    private var openAIAccountsHeightCap: CGFloat? {
-        MenuBarPopoverSizing.flexibleSectionHeightCap(
-            totalContentHeight: self.measuredMenuHeight,
-            flexibleSectionHeight: self.openAIAccountsMeasuredHeight,
-            availableHeight: self.statusItemAvailableContentHeight
-        )
-    }
-
-    private var menuBodyHeightCap: CGFloat? {
-        MenuBarPopoverSizing.flexibleSectionHeightCap(
-            totalContentHeight: self.measuredMenuHeight,
-            flexibleSectionHeight: self.scrollableMenuBodyMeasuredHeight,
-            availableHeight: self.statusItemAvailableContentHeight
         )
     }
 
@@ -691,13 +671,6 @@ struct MenuBarView: View {
         }
     }
 
-    private var visibleGroupedAccounts: [OpenAIAccountGroup] {
-        OpenAIAccountListLayout.visibleGroups(
-            from: groupedAccounts,
-            maxAccounts: visibleOpenAIAccountLimit
-        )
-    }
-
     private var availableCount: Int {
         store.accounts.filter { $0.usageStatus == .ok }.count
     }
@@ -747,6 +720,7 @@ struct MenuBarView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .codexbarStatusItemMenuWillOpen)) { _ in
             self.handleMenuPresentationOpened()
+            Task { await self.desktopThreadSettings.refresh() }
             // 每次打开菜单都从磁盘重读档案：菜单弹层的生命周期与视图状态不完全同步，
             // 删除后若不重读，界面可能继续显示已删除的档案。
             self.profileService.reload()
@@ -765,26 +739,25 @@ struct MenuBarView: View {
         }
     }
 
-    @ViewBuilder
     private var mainMenuContent: some View {
-        AdaptiveMenuHeightReportingContainer(onMeasuredHeightChange: self.reportMeasuredMenuHeight) {
-            menuContentStack
-        }
+        self.menuContentStack
+            .frame(
+                height: max(
+                    MenuBarPopoverSizing.minimumHeight,
+                    self.statusItemAvailableContentHeight ?? MenuBarPopoverSizing.defaultHeight
+                )
+            )
     }
 
     private var menuContentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             self.menuHeader
 
-            AdaptiveMenuScrollContainer(
-                maxHeight: max(
-                    MenuBarPopoverSizing.minimumHeight,
-                    self.menuBodyHeightCap ?? self.statusItemAvailableContentHeight ?? MenuBarPopoverSizing.defaultHeight
-                ),
-                onMeasuredHeightChange: self.reportScrollableMenuBodyMeasuredHeight
-            ) {
+            ScrollView(.vertical) {
                 self.scrollableMenuBody
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             Divider()
 
@@ -854,7 +827,7 @@ struct MenuBarView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
 
-                    self.modelSelectionRow(currentModel: requestRouteSummary.model)
+                    self.modelSelectionRow(currentModel: self.desktopThreadSettings.preset.model)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -872,7 +845,7 @@ struct MenuBarView: View {
                         Spacer(minLength: 0)
                     }
 
-                    self.modelSelectionRow(currentModel: store.activeModel)
+                    self.modelSelectionRow(currentModel: self.desktopThreadSettings.preset.model)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -970,44 +943,60 @@ struct MenuBarView: View {
     }
 
     private func modelSelectionRow(currentModel: String) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            self.compactSelectionMenu(
-                title: currentModel,
-                options: self.modelSelectionOptions(currentModel: currentModel),
-                currentValue: currentModel
-            ) { modelID in
-                Task { await self.updateSelectedRouteModel(modelID) }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(self.desktopThreadSettings.targetLabel)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+                if self.desktopThreadSettings.isBusy {
+                    ProgressView().controlSize(.mini)
+                }
             }
 
-            self.compactSelectionMenu(
-                title: self.store.config.global.reasoningEffort,
-                options: CodexBarGlobalSettings.reasoningEffortOptions(
-                    for: currentModel,
-                    currentValue: self.store.config.global.reasoningEffort
-                ),
-                currentValue: self.store.config.global.reasoningEffort
-            ) { effort in
-                Task { await self.updateSelectedReasoningEffort(effort) }
+            HStack(alignment: .center, spacing: 8) {
+                self.compactSelectionMenu(
+                    title: currentModel,
+                    options: self.modelSelectionOptions(currentModel: currentModel),
+                    currentValue: currentModel
+                ) { modelID in
+                    Task { await self.updateSelectedRouteModel(modelID) }
+                }
+
+                self.compactSelectionMenu(
+                    title: self.desktopThreadSettings.preset.reasoningEffort,
+                    options: CodexBarGlobalSettings.reasoningEffortOptions(
+                        for: currentModel,
+                        currentValue: self.desktopThreadSettings.preset.reasoningEffort
+                    ),
+                    currentValue: self.desktopThreadSettings.preset.reasoningEffort
+                ) { effort in
+                    Task { await self.updateSelectedReasoningEffort(effort) }
+                }
+
+                self.compactSelectionMenu(
+                    title: self.desktopThreadSettings.preset.serviceTier,
+                    options: self.serviceTierOptions,
+                    currentValue: self.desktopThreadSettings.preset.serviceTier
+                ) { serviceTier in
+                    Task { await self.updateSelectedServiceTier(serviceTier) }
+                }
+
+                self.contextWindowMenu(currentModel: currentModel)
+
+                Spacer(minLength: 0)
             }
 
-            self.compactSelectionMenu(
-                title: self.store.config.global.serviceTier,
-                options: self.serviceTierOptions,
-                currentValue: self.store.config.global.serviceTier
-            ) { serviceTier in
-                Task { await self.updateSelectedServiceTier(serviceTier) }
+            if let message = self.desktopThreadSettings.message {
+                Text(message)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
             }
-
-            self.contextWindowMenu(currentModel: currentModel)
-
-            Spacer(minLength: 0)
         }
-        .lineLimit(1)
     }
 
     private func contextWindowMenu(currentModel: String) -> some View {
-        let currentWindow = self.store.config.global.displayContextWindow(for: currentModel)
-        let overrideWindow = self.store.config.global.contextWindowOverride(for: currentModel)
+        let currentWindow = self.desktopThreadSettings.preset.contextWindow
         return Menu {
             ForEach(self.contextWindowPresetOptions, id: \.self) { window in
                 Button {
@@ -1028,10 +1017,8 @@ struct MenuBarView: View {
                 self.promptForCustomContextWindow(currentModel: currentModel)
             }
 
-            if overrideWindow != nil {
-                Button(L.contextWindowUseModelDefaultAction) {
-                    Task { await self.updateSelectedContextWindow(nil, for: currentModel) }
-                }
+            Button(L.contextWindowUseModelDefaultAction) {
+                Task { await self.updateSelectedContextWindow(nil, for: currentModel) }
             }
         } label: {
             self.compactMenuLabel(title: self.formatContextWindow(currentWindow))
@@ -1334,17 +1321,8 @@ struct MenuBarView: View {
                         .fill(Color.secondary.opacity(0.06))
                 )
             } else {
-                AdaptiveMenuScrollContainer(
-                    initialHeight: openAIAccountsInitialHeight,
-                    measuredHeight: {
-                        openAIAccountGroupsView(visibleGroupedAccounts)
-                    },
-                    maxHeightCap: self.openAIAccountsHeightCap,
-                    onMeasuredHeightChange: self.reportOpenAIAccountsMeasuredHeight
-                ) {
-                    openAIAccountGroupsView(groupedAccounts)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                openAIAccountGroupsView(groupedAccounts)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1710,23 +1688,6 @@ struct MenuBarView: View {
         Self.shortDayFormatter.string(from: date)
     }
 
-    private func reportMeasuredMenuHeight(_ height: CGFloat) {
-        self.measuredMenuHeight = height
-        NotificationCenter.default.post(
-            name: .codexbarStatusItemMeasuredHeightDidChange,
-            object: nil,
-            userInfo: ["height": height]
-        )
-    }
-
-    private func reportOpenAIAccountsMeasuredHeight(_ height: CGFloat) {
-        self.openAIAccountsMeasuredHeight = height
-    }
-
-    private func reportScrollableMenuBodyMeasuredHeight(_ height: CGFloat) {
-        self.scrollableMenuBodyMeasuredHeight = height
-    }
-
     private func requestStatusItemLayoutRefresh() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -1933,7 +1894,16 @@ struct MenuBarView: View {
 
     private func updateSelectedRouteModel(_ modelID: String) async {
         do {
-            try self.store.updateRouteModel(modelID)
+            let effort = CodexBarGlobalSettings.compatibleReasoningEffort(
+                self.desktopThreadSettings.preset.reasoningEffort,
+                for: modelID
+            )
+            try await self.desktopThreadSettings.apply(
+                model: modelID,
+                reasoningEffort: effort,
+                serviceTier: self.desktopThreadSettings.preset.serviceTier,
+                contextWindow: self.desktopThreadSettings.preset.contextWindow
+            )
             self.clearError()
         } catch {
             self.setGenericError(error.localizedDescription)
@@ -1942,7 +1912,12 @@ struct MenuBarView: View {
 
     private func updateSelectedReasoningEffort(_ effort: String) async {
         do {
-            try self.store.updateReasoningEffort(effort)
+            try await self.desktopThreadSettings.apply(
+                model: self.desktopThreadSettings.preset.model,
+                reasoningEffort: effort,
+                serviceTier: self.desktopThreadSettings.preset.serviceTier,
+                contextWindow: self.desktopThreadSettings.preset.contextWindow
+            )
             self.clearError()
         } catch {
             self.setGenericError(error.localizedDescription)
@@ -1951,7 +1926,12 @@ struct MenuBarView: View {
 
     private func updateSelectedServiceTier(_ serviceTier: String) async {
         do {
-            try self.store.updateServiceTier(serviceTier)
+            try await self.desktopThreadSettings.apply(
+                model: self.desktopThreadSettings.preset.model,
+                reasoningEffort: self.desktopThreadSettings.preset.reasoningEffort,
+                serviceTier: serviceTier,
+                contextWindow: self.desktopThreadSettings.preset.contextWindow
+            )
             self.clearError()
         } catch {
             self.setGenericError(error.localizedDescription)
@@ -1960,7 +1940,12 @@ struct MenuBarView: View {
 
     private func updateSelectedContextWindow(_ contextWindow: Int?, for modelID: String) async {
         do {
-            try self.store.updateModelContextWindow(contextWindow, for: modelID)
+            try await self.desktopThreadSettings.apply(
+                model: self.desktopThreadSettings.preset.model,
+                reasoningEffort: self.desktopThreadSettings.preset.reasoningEffort,
+                serviceTier: self.desktopThreadSettings.preset.serviceTier,
+                contextWindow: contextWindow ?? CodexBarGlobalSettings.defaultContextWindow(for: modelID)
+            )
             self.clearError()
         } catch {
             self.setGenericError(error.localizedDescription)
