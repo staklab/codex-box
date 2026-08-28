@@ -42,11 +42,13 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
 
     @Published private(set) var target: Target = .unavailable("尚未连接 Codex 桌面")
     @Published private(set) var preset: CodexDesktopThreadPreset = .fallback
+    @Published private(set) var effectiveContextWindow: Int?
     @Published private(set) var isBusy = false
     @Published private(set) var message: String?
 
     private let injection: CodexSkinInjectionService
     private var file: CodexDesktopThreadPresetFile
+    private var refreshGeneration = 0
 
     init(injection: CodexSkinInjectionService = .shared) {
         self.injection = injection
@@ -73,19 +75,42 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
         }
     }
 
+    /// 当前线程以 Codex 最近一次 token_count 上报的有效窗口为准；首页或尚未产生
+    /// token_count 的新线程仍显示用户配置值。
+    var displayedContextWindow: Int {
+        self.effectiveContextWindow ?? self.preset.contextWindow
+    }
+
     func refresh() async {
+        self.refreshGeneration += 1
+        let generation = self.refreshGeneration
         do {
             let route = try await self.currentDesktopRoute()
+            guard generation == self.refreshGeneration else { return }
             if route.routeKind == "local-thread", let threadID = route.conversationID {
                 self.target = .thread(threadID)
                 self.preset = self.file.threads[threadID] ?? Self.readGlobalPreset()
+                self.effectiveContextWindow = nil
+
+                let stateDBURL = CodexPaths.stateSQLiteURL
+                let effectiveWindow = await Task.detached(priority: .utility) {
+                    CodexThreadContextWindowReader(stateDBURL: stateDBURL)
+                        .latestEffectiveContextWindow(threadID: threadID)
+                }.value
+                guard generation == self.refreshGeneration,
+                      self.target == .thread(threadID)
+                else { return }
+                self.effectiveContextWindow = effectiveWindow
             } else {
                 self.target = .home
                 self.preset = self.file.defaultPreset
+                self.effectiveContextWindow = nil
             }
             self.message = nil
         } catch {
+            guard generation == self.refreshGeneration else { return }
             self.target = .unavailable(error.localizedDescription)
+            self.effectiveContextWindow = nil
             self.message = error.localizedDescription
         }
     }
@@ -114,6 +139,7 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
             self.file.defaultPreset = next
             try self.persist()
             self.preset = next
+            self.effectiveContextWindow = nil
             self.message = "已更新新对话默认值；无需重启。"
 
         case .thread(let threadID):
@@ -142,6 +168,8 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
             self.file.threads[threadID] = next
             try self.persist()
             self.preset = next
+            // 新配置会在下一轮消息产生新的 token_count 后被重新识别。
+            self.effectiveContextWindow = nil
             self.message = "已应用到当前对话；下一轮消息生效，无需重启。"
 
         case .unavailable(let reason):

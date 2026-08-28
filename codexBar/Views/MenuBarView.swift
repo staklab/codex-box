@@ -996,7 +996,7 @@ struct MenuBarView: View {
     }
 
     private func contextWindowMenu(currentModel: String) -> some View {
-        let currentWindow = self.desktopThreadSettings.preset.contextWindow
+        let currentWindow = self.desktopThreadSettings.displayedContextWindow
         return Menu {
             ForEach(self.contextWindowPresetOptions, id: \.self) { window in
                 Button {
@@ -1595,11 +1595,15 @@ struct MenuBarView: View {
         if value == CodexBarGlobalSettings.gpt56ContextWindow {
             return "1.05M"
         }
-        if value >= 1_000_000, value % 1_000_000 == 0 {
-            return "\(value / 1_000_000)M"
+        if value >= 1_000_000 {
+            let formatted = String(format: "%.2f", Double(value) / 1_000_000)
+                .replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression)
+            return "\(formatted)M"
         }
-        if value >= 1_000, value % 1_000 == 0 {
-            return "\(value / 1_000)k"
+        if value >= 1_000 {
+            let formatted = String(format: "%.1f", Double(value) / 1_000)
+                .replacingOccurrences(of: #"\.0$"#, with: "", options: .regularExpression)
+            return "\(formatted)k"
         }
         return "\(value)"
     }
@@ -1644,7 +1648,7 @@ struct MenuBarView: View {
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
         input.placeholderString = "258k"
         input.stringValue = self.formatContextWindow(
-            self.store.config.global.displayContextWindow(for: currentModel)
+            self.desktopThreadSettings.displayedContextWindow
         )
         alert.accessoryView = input
 
