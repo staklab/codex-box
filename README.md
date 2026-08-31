@@ -6,8 +6,8 @@
 
 <p align="center">
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue" /></a>
-  <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-black" />
-  <img alt="Swift" src="https://img.shields.io/badge/language-Swift-f05138" />
+  <img alt="macOS / Windows" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black" />
+  <img alt="Swift / Rust" src="https://img.shields.io/badge/language-Swift%20%7C%20Rust-f05138" />
 </p>
 
 <p align="center">
@@ -54,8 +54,12 @@
 
 ## 平台支持
 
-当前只提供 **macOS 版本**，GitHub Release 仅发布 macOS DMG。
-暂不提供 Windows 或 Linux 版本。
+当前提供原生 **macOS 菜单栏版本**，以及独立的 **Windows Tauri 系统托盘版本**。
+
+- macOS：SwiftUI/AppKit，发布 DMG。
+- Windows：Tauri 2 + Rust，构建 NSIS `.exe` 与 WiX `.msi`，源码与说明见
+  [`windows/`](windows/README.md)。
+- Linux：暂不提供。
 
 下载：[v1.2.9 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.9)
 

@@ -1,7 +1,7 @@
 # codex-box
 
-`codex-box` is a macOS menu bar companion designed to coexist with the official
-Codex Desktop app without rewriting its shared OAuth credentials.
+`codex-box` is a macOS menu bar and Windows system tray companion designed to
+coexist with Codex without rewriting its shared OAuth credentials.
 
 [简体中文](README.md)
 
@@ -30,9 +30,9 @@ Codex Desktop app without rewriting its shared OAuth credentials.
 
 ## Platform support
 
-The current release is **macOS-only** and requires macOS 13 or later. GitHub
-Releases provide a macOS DMG. Windows and Linux builds are not currently
-available.
+The native macOS build requires macOS 13 or later and is distributed as a DMG.
+The independent [Windows build](windows/README.md) uses Tauri 2 and Rust and
+produces NSIS `.exe` and WiX `.msi` installers. Linux is not currently supported.
 
 Download: [v1.2.8 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.8)
 
