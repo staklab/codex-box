@@ -157,6 +157,17 @@ enum L {
     static var updateErrorAutomaticUpdateUnavailable: String {
         zh ? "当前构建尚未接入可执行的自动更新引擎。" : "An executable automatic update engine is not available in this build."
     }
+    static var updateErrorMissingArtifactDigest: String { zh ? "更新包缺少 SHA-256 校验值。" : "The update artifact is missing a SHA-256 digest." }
+    static var updateErrorArtifactDigestMismatch: String { zh ? "更新包校验失败，已停止安装。" : "The update artifact digest does not match; installation was stopped." }
+    static func updateErrorExtractionFailed(_ message: String) -> String { zh ? "更新包处理失败：\(message)" : "Failed to process the update artifact: \(message)" }
+    static var updateErrorBundleNotFound: String { zh ? "更新包中没有找到 codex-box.app。" : "codex-box.app was not found in the update artifact." }
+    static func updateErrorInvalidBundle(_ message: String) -> String { zh ? "更新应用验证失败：\(message)" : "Update app validation failed: \(message)" }
+    static func updateErrorInstallPermissionDenied(_ path: String) -> String { zh ? "没有权限在 \(path) 中替换应用。" : "The app cannot be replaced in \(path) because it is not writable." }
+    static func updateErrorHelperLaunchFailed(_ message: String) -> String { zh ? "无法启动更新替换程序：\(message)" : "Failed to launch the update replacement helper: \(message)" }
+    nonisolated static var updateValidationUnreadableBundle: String { zh ? "无法读取应用信息" : "Unable to read app bundle metadata" }
+    nonisolated static var updateValidationBundleIdentifierMismatch: String { zh ? "Bundle Identifier 不一致" : "Bundle identifier mismatch" }
+    nonisolated static func updateValidationVersionMismatch(_ actual: String, _ expected: String) -> String { zh ? "版本为 \(actual)，预期为 \(expected)" : "Version is \(actual), expected \(expected)" }
+    nonisolated static var updateValidationCodeSignatureFailed: String { zh ? "代码签名校验失败" : "Code signature verification failed" }
     static var settingsWindowTitle: String { self.settings }
     static var settingsWindowHint: String {
         zh
@@ -178,7 +189,7 @@ enum L {
     static var settingsUpdatesStatusTitle: String { zh ? "更新状态" : "Update Status" }
     static var settingsUpdatesUnknownVersion: String { zh ? "尚未检查" : "Not Checked Yet" }
     static var settingsUpdatesCheckAction: String { zh ? "检查 GitHub 上的最新稳定版本" : "Check the Latest Stable Version on GitHub" }
-    static var settingsUpdatesInstallAction: String { zh ? "继续下载或安装更新" : "Continue Download or Install" }
+    static var settingsUpdatesInstallAction: String { zh ? "下载、安装并重启" : "Download, Install, and Restart" }
     static var settingsUpdatesChecking: String { zh ? "正在检查 GitHub 上的最新稳定版本…" : "Checking the latest stable version on GitHub..." }
     static var settingsUpdatesIdle: String { zh ? "尚未发起更新检查。" : "No update check has been started yet." }
     static var settingsUpdatesSourceNote: String {

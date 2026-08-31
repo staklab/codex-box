@@ -49,6 +49,15 @@ struct AppUpdateArtifact: Codable, Equatable, Identifiable {
     var id: String {
         "\(self.architecture.rawValue)-\(self.format.rawValue)-\(self.downloadURL.absoluteString)"
     }
+
+    nonisolated var hasValidSHA256: Bool {
+        guard let sha256, sha256.count == 64 else { return false }
+        return sha256.unicodeScalars.allSatisfy { scalar in
+            (48...57).contains(scalar.value)
+                || (65...70).contains(scalar.value)
+                || (97...102).contains(scalar.value)
+        }
+    }
 }
 
 struct GitHubReleaseIndexEntry: Decodable, Equatable {
@@ -88,13 +97,15 @@ struct GitHubReleaseIndexEntry: Decodable, Equatable {
         let artifacts = self.installableArtifacts
         guard artifacts.isEmpty == false else { return nil }
 
+        let supportsAutomaticDelivery = artifacts.allSatisfy(\.hasValidSHA256)
+
         return AppUpdateRelease(
             version: self.normalizedVersion,
             publishedAt: self.publishedAt,
             summary: Self.firstNonEmpty(self.body, fallback: self.name),
             releaseNotesURL: self.htmlURL,
             downloadPageURL: self.htmlURL,
-            deliveryMode: .guidedDownload,
+            deliveryMode: supportsAutomaticDelivery ? .automatic : .guidedDownload,
             minimumAutomaticUpdateVersion: nil,
             artifacts: artifacts
         )

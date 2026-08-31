@@ -213,6 +213,24 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
         XCTAssertEqual(artifact.format, .dmg)
     }
 
+    func testAutomaticUpdateRequiresAValidHexSHA256() {
+        let valid = AppUpdateArtifact(
+            architecture: .universal,
+            format: .dmg,
+            downloadURL: URL(string: "https://example.com/valid.dmg")!,
+            sha256: String(repeating: "A", count: 64)
+        )
+        let malformed = AppUpdateArtifact(
+            architecture: .universal,
+            format: .dmg,
+            downloadURL: URL(string: "https://example.com/malformed.dmg")!,
+            sha256: String(repeating: "g", count: 64)
+        )
+
+        XCTAssertTrue(valid.hasValidSHA256)
+        XCTAssertFalse(malformed.hasValidSHA256)
+    }
+
     func testGitHubReleasesLoaderSkipsDraftPrereleaseAndMissingArtifacts() async throws {
         let releasesURL = URL(string: "https://api.github.com/repos/lizhelang/codexbar/releases")!
         let session = self.makeMockSession()
@@ -264,12 +282,12 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
                   {
                     "name": "codexbar-1.1.9-macOS.dmg",
                     "browser_download_url": "https://example.com/universal.dmg",
-                    "digest": "sha256:abc123"
+                    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                   },
                   {
                     "name": "codexbar-1.1.9-macOS-intel.zip",
                     "browser_download_url": "https://example.com/intel.zip",
-                    "digest": "sha256:def456"
+                    "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                   }
                 ]
               }
@@ -294,14 +312,14 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
         let release = try await loader.loadLatestRelease()
 
         XCTAssertEqual(release.version, "1.1.9")
-        XCTAssertEqual(release.deliveryMode, .guidedDownload)
+        XCTAssertEqual(release.deliveryMode, .automatic)
         XCTAssertEqual(release.artifacts.count, 2)
         XCTAssertEqual(release.artifacts[0].architecture, .universal)
         XCTAssertEqual(release.artifacts[0].format, .dmg)
-        XCTAssertEqual(release.artifacts[0].sha256, "abc123")
+        XCTAssertEqual(release.artifacts[0].sha256, String(repeating: "a", count: 64))
         XCTAssertEqual(release.artifacts[1].architecture, .x86_64)
         XCTAssertEqual(release.artifacts[1].format, .zip)
-        XCTAssertEqual(release.artifacts[1].sha256, "def456")
+        XCTAssertEqual(release.artifacts[1].sha256, String(repeating: "b", count: 64))
     }
 
     func testManualCheckDoesNotTreatReissued119AsUpgradeable() async {
@@ -325,7 +343,7 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
         XCTAssertEqual(checkedVersion, "1.1.9")
     }
 
-    func testStableFeedUsesGuidedDownloadArtifacts() throws {
+    func testCurrentStableFeedRemainsGuidedForBootstrap() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -433,6 +451,144 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
             blockers,
             [.failingGatekeeperAssessment(summary: "accepted | source=no usable signature")]
         )
+    }
+
+    func testDigestPinnedReleaseAllowsAutomaticUpdaterForAdHocBootstrap() {
+        let evaluator = DefaultAppUpdateCapabilityEvaluator(
+            signatureInspector: MockSignatureInspector(
+                inspection: AppSignatureInspection(
+                    hasUsableSignature: false,
+                    summary: "Signature=adhoc; TeamIdentifier=not set"
+                )
+            ),
+            gatekeeperInspector: MockGatekeeperInspector(
+                inspection: AppGatekeeperInspection(
+                    passesAssessment: false,
+                    summary: "source=no usable signature"
+                )
+            ),
+            automaticUpdaterAvailable: true,
+            allowsDigestVerifiedUpdatesWithoutTrustedSignature: true
+        )
+        let release = AppUpdateRelease(
+            version: "1.2.11",
+            publishedAt: nil,
+            summary: nil,
+            releaseNotesURL: URL(string: "https://example.com/release-notes")!,
+            downloadPageURL: URL(string: "https://example.com/download")!,
+            deliveryMode: .automatic,
+            minimumAutomaticUpdateVersion: nil,
+            artifacts: [
+                AppUpdateArtifact(
+                    architecture: .universal,
+                    format: .dmg,
+                    downloadURL: URL(string: "https://example.com/codex-box.dmg")!,
+                    sha256: String(repeating: "a", count: 64)
+                ),
+            ]
+        )
+
+        let blockers = evaluator.blockers(
+            for: release,
+            environment: MockUpdateEnvironment(
+                currentVersion: "1.2.10",
+                bundleURL: URL(fileURLWithPath: "/Applications/codex-box.app"),
+                architecture: .arm64
+            )
+        )
+
+        XCTAssertTrue(blockers.isEmpty)
+    }
+
+    func testUpdateInstallerComputesSHA256WithoutLoadingWholeFile() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-box-update-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        try Data("codex-box-update".utf8).write(to: fileURL)
+
+        XCTAssertEqual(
+            try AppUpdateInstaller.sha256(of: fileURL),
+            "2c029107a899cca72423bfd9d8fe19356a7536e95bf11fecb35ab472f88a1c81"
+        )
+    }
+
+    func testUpdateHelperReplacesBundleAndRemovesBackup() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-box-helper-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let targetURL = rootURL.appendingPathComponent("codex-box.app", isDirectory: true)
+        let stagedURL = rootURL.appendingPathComponent("staged.app", isDirectory: true)
+        let backupURL = rootURL.appendingPathComponent("backup.app", isDirectory: true)
+        let workURL = rootURL.appendingPathComponent("work", isDirectory: true)
+        try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stagedURL, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: targetURL.appendingPathComponent("marker"))
+        try Data("new".utf8).write(to: stagedURL.appendingPathComponent("marker"))
+
+        let status = try self.runUpdateHelper(
+            targetURL: targetURL,
+            stagedURL: stagedURL,
+            backupURL: backupURL,
+            workURL: workURL
+        )
+
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(try String(contentsOf: targetURL.appendingPathComponent("marker")), "new")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backupURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workURL.path))
+    }
+
+    func testUpdateHelperRestoresOriginalBundleWhenReplacementFails() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-box-helper-rollback-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let targetURL = rootURL.appendingPathComponent("codex-box.app", isDirectory: true)
+        let missingStagedURL = rootURL.appendingPathComponent("missing.app", isDirectory: true)
+        let backupURL = rootURL.appendingPathComponent("backup.app", isDirectory: true)
+        let workURL = rootURL.appendingPathComponent("work", isDirectory: true)
+        try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: targetURL.appendingPathComponent("marker"))
+
+        let status = try self.runUpdateHelper(
+            targetURL: targetURL,
+            stagedURL: missingStagedURL,
+            backupURL: backupURL,
+            workURL: workURL
+        )
+
+        XCTAssertNotEqual(status, 0)
+        XCTAssertEqual(try String(contentsOf: targetURL.appendingPathComponent("marker")), "old")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backupURL.path))
+    }
+
+    private func runUpdateHelper(
+        targetURL: URL,
+        stagedURL: URL,
+        backupURL: URL,
+        workURL: URL
+    ) throws -> Int32 {
+        try FileManager.default.createDirectory(at: workURL, withIntermediateDirectories: true)
+        let scriptURL = workURL.appendingPathComponent("install-update.zsh")
+        try AppUpdateInstaller.helperScript.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+
+        let process = Process()
+        process.executableURL = scriptURL
+        process.arguments = [
+            "99999999",
+            targetURL.path,
+            stagedURL.path,
+            backupURL.path,
+            workURL.path,
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["CODEX_BOX_UPDATE_SKIP_RELAUNCH"] = "1"
+        process.environment = environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 
     private func makeFeed(
