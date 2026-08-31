@@ -42,5 +42,12 @@
       },
       "wix": { "language": ["zh-CN", "en-US"] }
     }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["dreamskin", "codexbox"]
+      }
+    }
   }
 }

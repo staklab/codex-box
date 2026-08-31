@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  与官方 Codex Desktop 长期共存的 macOS 菜单栏伴侣。<br>
+  与官方 Codex Desktop 长期共存的 macOS 菜单栏与 Windows 系统托盘伴侣。<br>
   不改写共享 OAuth 凭据，提供用量统计、隔离运行档案、账号网关与皮肤市场。
 </p>
 
@@ -58,10 +58,11 @@
 
 - macOS：SwiftUI/AppKit，发布 DMG。
 - Windows：Tauri 2 + Rust，构建 NSIS `.exe` 与 WiX `.msi`，源码与说明见
-  [`windows/`](windows/README.md)。
+  [`windows/`](windows/README.md)；支持主题市场、DreamSkin 协议、CDP 热换肤、会话参数、
+  Provider 多账号路由与详细记录。
 - Linux：暂不提供。
 
-下载：[v1.2.9 macOS Release](https://github.com/staklab/codex-box/releases/tag/v1.2.9)
+下载：[GitHub Releases](https://github.com/staklab/codex-box/releases)
 
 ## 本地构建
 

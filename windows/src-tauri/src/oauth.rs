@@ -170,7 +170,9 @@ fn string_claim(value: Option<&Value>) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn account_from_credentials(credentials: &AccountCredentials) -> anyhow::Result<Account> {
+pub(crate) fn account_from_credentials(
+    credentials: &AccountCredentials,
+) -> anyhow::Result<Account> {
     let access = decode_claims(&credentials.access_token)?;
     let id = decode_claims(&credentials.id_token)?;
     let auth = access

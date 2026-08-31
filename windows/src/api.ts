@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Account, Dashboard, GatewayStatus, Profile, StartedFlow, UpdateInfo } from "./types";
+import type { Account, Dashboard, DesktopStatus, GatewayStatus, Profile, Provider, RecordsSnapshot, StartedFlow, ThemeListing, ThemePage, ThreadPreset, UpdateInfo } from "./types";
 
 export const api = {
   dashboard: () => invoke<Dashboard>("get_dashboard"),
@@ -8,6 +8,8 @@ export const api = {
   refreshUsage: (accountId: string) => invoke<Account>("refresh_usage", { accountId }),
   setActive: (accountId: string) => invoke<void>("set_active_account", { accountId }),
   removeAccount: (accountId: string) => invoke<void>("remove_account", { accountId }),
+  exportAccounts: (path: string) => invoke<number>("export_accounts", { path }),
+  importAccounts: (path: string) => invoke<number>("import_accounts", { path }),
   createProfile: (name: string, accountId?: string) => invoke<Profile>("create_profile", { name, accountId: accountId || null }),
   launchProfile: (profileId: string) => invoke<void>("launch_profile", { profileId }),
   removeProfile: (profileId: string) => invoke<void>("remove_profile", { profileId }),
@@ -15,4 +17,26 @@ export const api = {
   stopGateway: () => invoke<void>("stop_gateway"),
   setStartAtLogin: (enabled: boolean) => invoke<void>("set_start_at_login", { enabled }),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  createProvider: (input: { label: string; kind: string; baseUrl: string; model: string; accountLabel: string; apiKey: string }) => invoke<Provider>("create_provider", input),
+  removeProvider: (providerId: string) => invoke<void>("remove_provider", { providerId }),
+  setActiveProvider: (providerId: string | null) => invoke<void>("set_active_provider", { providerId }),
+  addProviderAccount: (providerId: string, label: string, apiKey: string) => invoke<Provider>("add_provider_account", { providerId, label, apiKey }),
+  removeProviderAccount: (providerId: string, accountId: string) => invoke<Provider>("remove_provider_account", { providerId, accountId }),
+  setActiveProviderAccount: (providerId: string, accountId: string) => invoke<void>("set_active_provider_account", { providerId, accountId }),
+  setAutoRoute: (enabled: boolean, threshold: number) => invoke<void>("set_auto_route", { enabled, threshold }),
+  records: () => invoke<RecordsSnapshot>("get_records"),
+  refreshThemes: (query = "") => invoke<ThemePage>("refresh_theme_market", { query }),
+  themePage: (offset: number, limit: number, query: string) => invoke<ThemePage>("theme_page", { offset, limit, query }),
+  setThemeSource: (sourceId: string, enabled: boolean) => invoke<void>("set_theme_source", { sourceId, enabled }),
+  addThemeSource: (name: string, baseUrl: string) => invoke("add_theme_source", { name, baseUrl }),
+  installTheme: (themeId: string, sourceName: string) => invoke<void>("install_market_theme", { themeId, sourceName }),
+  installDreamSkin: (versionId: string) => invoke<void>("install_dreamskin_version", { versionId }),
+  importLocalTheme: (directory: string) => invoke<ThemeListing>("import_local_theme", { directory }),
+  applyTheme: (themeId: string, restartCodex: boolean) => invoke<void>("apply_theme", { themeId, restartCodex }),
+  revertTheme: () => invoke<void>("revert_theme"),
+  uninstallTheme: (themeId: string) => invoke<void>("uninstall_theme", { themeId }),
+  setAutoReapply: (enabled: boolean) => invoke<void>("set_auto_reapply", { enabled }),
+  setCodexExecutable: (path: string) => invoke<void>("set_codex_executable", { path }),
+  desktopStatus: () => invoke<DesktopStatus>("get_desktop_status"),
+  updateDesktopSettings: (preset: ThreadPreset) => invoke<void>("update_desktop_settings", { preset }),
 };

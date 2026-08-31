@@ -1,4 +1,4 @@
-use crate::models::{Account, AccountCredentials, GatewayStatus};
+use crate::models::{Account, AccountCredentials, GatewayStatus, Provider};
 use axum::{
     body::{Body, Bytes},
     extract::State,
@@ -12,8 +12,9 @@ use rand::RngCore;
 
 #[derive(Clone)]
 struct GatewayDeps {
-    account: Account,
-    credentials: AccountCredentials,
+    bearer_token: String,
+    account_header: Option<String>,
+    upstream_base: String,
     api_key: String,
     client: reqwest::Client,
 }
@@ -43,13 +44,49 @@ pub async fn start(
         api_key: api_key.clone(),
         account_id: account.id.clone(),
         account_email: account.email.clone(),
+        route_model: None,
     };
     let deps = GatewayDeps {
-        account,
-        credentials,
+        bearer_token: credentials.access_token,
+        account_header: Some(account.remote_account_id().to_owned()),
+        upstream_base: "https://chatgpt.com/backend-api/codex".into(),
         api_key,
-        client: reqwest::Client::new(),
+        client: reqwest::Client::builder().build()?,
     };
+    serve(listener, status, deps).await
+}
+
+pub async fn start_provider(
+    provider: Provider,
+    api_token: String,
+) -> anyhow::Result<GatewayRuntime> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let mut key_bytes = [0_u8; 32];
+    rand::rng().fill_bytes(&mut key_bytes);
+    let api_key = format!("cbx_{}", URL_SAFE_NO_PAD.encode(key_bytes));
+    let status = GatewayStatus {
+        base_url: format!("http://127.0.0.1:{}/v1", address.port()),
+        api_key: api_key.clone(),
+        account_id: provider.id.clone(),
+        account_email: provider.label.clone(),
+        route_model: Some(provider.model.clone()),
+    };
+    let deps = GatewayDeps {
+        bearer_token: api_token,
+        account_header: None,
+        upstream_base: provider.base_url.trim_end_matches('/').to_owned(),
+        api_key,
+        client: reqwest::Client::builder().build()?,
+    };
+    serve(listener, status, deps).await
+}
+
+async fn serve(
+    listener: tokio::net::TcpListener,
+    status: GatewayStatus,
+    deps: GatewayDeps,
+) -> anyhow::Result<GatewayRuntime> {
     let router = Router::new()
         .route("/v1/responses", post(proxy_responses))
         .route("/responses", post(proxy_responses))
@@ -71,14 +108,7 @@ async fn proxy_responses(
     uri: Uri,
     body: Bytes,
 ) -> Response<Body> {
-    proxy(
-        state.0,
-        headers,
-        uri,
-        body,
-        "https://chatgpt.com/backend-api/codex/responses",
-    )
-    .await
+    proxy(state.0, headers, uri, body, "responses").await
 }
 
 async fn proxy_compact(
@@ -87,14 +117,7 @@ async fn proxy_compact(
     uri: Uri,
     body: Bytes,
 ) -> Response<Body> {
-    proxy(
-        state.0,
-        headers,
-        uri,
-        body,
-        "https://chatgpt.com/backend-api/codex/responses/compact",
-    )
-    .await
+    proxy(state.0, headers, uri, body, "responses/compact").await
 }
 
 async fn proxy(
@@ -102,7 +125,7 @@ async fn proxy(
     headers: HeaderMap,
     _uri: Uri,
     body: Bytes,
-    upstream: &str,
+    upstream_path: &str,
 ) -> Response<Body> {
     let expected = format!("Bearer {}", deps.api_key);
     if headers
@@ -112,14 +135,17 @@ async fn proxy(
     {
         return json_error(StatusCode::UNAUTHORIZED, "本地网关密钥无效");
     }
+    let upstream = format!("{}/{}", deps.upstream_base, upstream_path);
     let mut request = deps
         .client
         .post(upstream)
         .body(body)
-        .bearer_auth(&deps.credentials.access_token)
-        .header("chatgpt-account-id", deps.account.remote_account_id())
+        .bearer_auth(&deps.bearer_token)
         .header("originator", "Codex Desktop")
         .header("OpenAI-Beta", "responses=experimental");
+    if let Some(account) = &deps.account_header {
+        request = request.header("chatgpt-account-id", account);
+    }
     for name in [
         "content-type",
         "accept",
@@ -171,6 +197,8 @@ fn json_error(status: StatusCode, message: &str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
 
     #[tokio::test]
     async fn gateway_binds_only_to_loopback_and_uses_random_key() {
@@ -199,5 +227,41 @@ mod tests {
         assert!(runtime.status.base_url.starts_with("http://127.0.0.1:"));
         assert!(runtime.status.api_key.starts_with("cbx_"));
         assert!(runtime.status.api_key.len() > 30);
+    }
+
+    #[tokio::test]
+    async fn provider_gateway_routes_to_the_configured_responses_endpoint() {
+        let upstream = MockServer::start_async().await;
+        let response_mock = upstream
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/v1/responses")
+                    .header("authorization", "Bearer provider-key");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(r#"{"ok":true}"#);
+            })
+            .await;
+        let provider = Provider {
+            id: "provider".into(),
+            label: "Provider".into(),
+            kind: "openAiCompatible".into(),
+            base_url: format!("{}/v1", upstream.base_url()),
+            model: "model".into(),
+            accounts: Vec::new(),
+            active_account_id: None,
+        };
+        let runtime = start_provider(provider, "provider-key".into())
+            .await
+            .unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("{}/responses", runtime.status.base_url))
+            .bearer_auth(&runtime.status.api_key)
+            .json(&serde_json::json!({"model":"model"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response_mock.assert_async().await;
     }
 }

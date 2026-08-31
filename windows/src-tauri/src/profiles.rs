@@ -20,17 +20,23 @@ pub fn create(name: String, account_id: Option<String>) -> anyhow::Result<Profil
     })
 }
 
-pub fn launch(profile: &Profile, gateway: Option<(&str, &str)>) -> anyhow::Result<Child> {
+pub fn launch(
+    profile: &Profile,
+    gateway: Option<(&str, &str, Option<&str>)>,
+) -> anyhow::Result<Child> {
     let mut command = Command::new("codex");
     command
         .env("CODEX_HOME", &profile.codex_home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some((base_url, api_key)) = gateway {
+    if let Some((base_url, api_key, model)) = gateway {
         command
             .env("OPENAI_BASE_URL", base_url)
             .env("OPENAI_API_KEY", api_key);
+        if let Some(model) = model {
+            command.args(["--model", model]);
+        }
     }
     #[cfg(windows)]
     {
