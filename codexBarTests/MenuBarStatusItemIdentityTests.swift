@@ -24,7 +24,7 @@ final class MenuBarStatusItemIdentityTests: XCTestCase {
     }
 
     func testIdentityConstantsStayStable() {
-        XCTAssertEqual(MenuBarStatusItemIdentity.accessibilityLabel, "codexbar")
+        XCTAssertEqual(MenuBarStatusItemIdentity.accessibilityLabel, "codex-box")
         XCTAssertEqual(MenuBarStatusItemIdentity.accessibilityIdentifier, "codexbar.status-item")
         XCTAssertEqual(
             MenuBarStatusItemIdentity.statusItemAutosaveName,

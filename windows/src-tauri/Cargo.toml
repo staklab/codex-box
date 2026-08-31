@@ -1,6 +1,6 @@
 [package]
 name = "codex-box-windows"
-version = "1.2.9"
+version = "1.2.10"
 description = "codex-box Windows 系统托盘伴侣"
 authors = ["codex-box contributors"]
 edition = "2021"

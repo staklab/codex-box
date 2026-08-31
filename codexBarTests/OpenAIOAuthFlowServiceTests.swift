@@ -60,8 +60,8 @@ final class OpenAIOAuthFlowServiceTests: CodexBarTestCase {
         XCTAssertTrue(result.active)
         XCTAssertTrue(result.synchronized)
         XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.oauthFlowsDirectoryURL.appendingPathComponent("\(started.flowID).json").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: CodexPaths.authURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: CodexPaths.configTomlURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.authURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.configTomlURL.path))
     }
 
     func testCompleteFlowAcceptsBareCodeWhenStateDiffers() async throws {

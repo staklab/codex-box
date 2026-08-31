@@ -743,13 +743,15 @@ async fn apply_installed_theme(
     if !state.installed.iter().any(|theme| theme.id == theme_id) {
         return Err("主题尚未安装".into());
     }
+    // 早期 Windows 版本沿用了不会驱动界面配色的 macOS ChromeTheme 表；
+    // 先清理它，避免官方桌面端解析旧配置后进入错误页。实际换肤只走 CDP 注入。
+    themes::revert_native_colors().map_err(error_message)?;
     let (port, executable) = desktop::ensure_debug_port(&state, restart_codex)
         .await
         .map_err(error_message)?;
     desktop::inject_theme(&theme_id, port)
         .await
         .map_err(error_message)?;
-    themes::apply_native_colors(&theme_id).map_err(error_message)?;
     let mut store = context.store.lock().map_err(error_message)?;
     store
         .set_theme_runtime(Some(executable), Some(port))
@@ -823,13 +825,29 @@ fn set_codex_executable(
     path: String,
 ) -> Result<(), String> {
     let path = std::path::PathBuf::from(path.trim());
+    if path.as_os_str().is_empty() {
+        let port = context
+            .store
+            .lock()
+            .map_err(error_message)?
+            .theme_state()
+            .debug_port;
+        return context
+            .store
+            .lock()
+            .map_err(error_message)?
+            .set_theme_runtime(None, port)
+            .map_err(error_message);
+    }
     if !path.is_file()
         || !path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("Codex.exe"))
+            .is_some_and(|name| {
+                name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe")
+            })
     {
-        return Err("请选择有效的 Codex.exe".into());
+        return Err("请选择有效的 Codex.exe 或 ChatGPT.exe".into());
     }
     let port = context
         .store
@@ -853,7 +871,16 @@ async fn get_desktop_status(
         let store = context.store.lock().map_err(error_message)?;
         (store.theme_state(), store.config().thread_preset.clone())
     };
-    Ok(desktop::desktop_status(&state, preset).await)
+    let status = desktop::desktop_status(&state, preset).await;
+    if status.codex_executable != state.codex_executable || status.debug_port != state.debug_port {
+        context
+            .store
+            .lock()
+            .map_err(error_message)?
+            .set_theme_runtime(status.codex_executable.clone(), status.debug_port)
+            .map_err(error_message)?;
+    }
+    Ok(status)
 }
 
 #[tauri::command]

@@ -210,7 +210,7 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         XCTAssertEqual(legacyResponse.statusCode, 502)
         XCTAssertEqual(
             legacyResponse.body,
-            #"{"error":{"message":"codexbar gateway failed to reach OpenAI upstream"}}"#
+            #"{"error":{"message":"codex-box gateway failed to reach OpenAI upstream"}}"#
         )
         let proxyHitsAfterLegacy = rejectingProxy.connectionCount
         XCTAssertGreaterThanOrEqual(proxyHitsAfterLegacy, 1)
@@ -1273,7 +1273,7 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         )
         XCTAssertEqual(
             observed.3,
-            ["codexbar", "codexbar", "codexbar"]
+            ["codex-box", "codex-box", "codex-box"]
         )
         XCTAssertEqual(service.currentRoutedAccountIDForTesting(), "acct-beta")
 
@@ -2033,7 +2033,7 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         XCTAssertEqual(response.statusCode, 502)
         XCTAssertEqual(
             String(data: response.body, encoding: .utf8),
-            #"{"error":{"message":"codexbar gateway failed to reach OpenAI upstream"}}"#
+            #"{"error":{"message":"codex-box gateway failed to reach OpenAI upstream"}}"#
         )
         XCTAssertEqual(
             observedQueue.sync { attemptedAuthorizations },
@@ -2715,7 +2715,7 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         )
         XCTAssertEqual(
             observed.3,
-            ["codexbar", "codexbar", "codexbar"]
+            ["codex-box", "codex-box", "codex-box"]
         )
         XCTAssertEqual(service.currentRoutedAccountIDForTesting(), "acct-beta")
 

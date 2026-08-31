@@ -12,7 +12,11 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 const dashboard = { accounts: [{ id: "a1", email: "test@example.com", openaiAccountId: "org", planType: "plus", primaryUsedPercent: 25, secondaryUsedPercent: 70, primaryResetAt: null, secondaryResetAt: null, lastChecked: null, isActive: true, isSuspended: false, tokenExpired: false, organizationName: null }], profiles: [], providers: [], activeProviderId: null, themeState: { installed: [], appliedThemeId: null, autoReapply: false, codexExecutable: null, debugPort: null }, themeSources: [], autoRouteEnabled: false, autoRouteThreshold: 90, cost: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 50, estimatedUsd: .02, sessionCount: 2 }, gateway: null, startAtLogin: false };
 
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.dashboard).mockResolvedValue(dashboard); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(api.dashboard).mockResolvedValue(dashboard);
+  vi.mocked(api.desktopStatus).mockResolvedValue({ connected: false, target: "已识别，等待换肤连接", conversationId: null, preset: { model: "gpt-5.6-sol", reasoningEffort: "medium", serviceTier: "flex", contextWindow: 272000 }, codexExecutable: "C:\\Program Files\\ChatGPT\\ChatGPT.exe", debugPort: null });
+});
 
 test("renders account usage and local cost", async () => {
   render(<App />);
@@ -40,4 +44,15 @@ test("renders only one bounded page for a large theme market", async () => {
   expect(await screen.findByText("主题 23")).toBeInTheDocument();
   expect(container.querySelectorAll(".theme-card")).toHaveLength(24);
   expect(screen.getByText("1 / 21")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "概览" }));
+  fireEvent.click(screen.getByRole("button", { name: "主题" }));
+  expect(container.querySelectorAll(".theme-card")).toHaveLength(24);
+  expect(api.refreshThemes).toHaveBeenCalledTimes(1);
+});
+
+test("automatically displays the detected Codex Desktop path", async () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "桌面" }));
+  expect(await screen.findByDisplayValue("C:\\Program Files\\ChatGPT\\ChatGPT.exe")).toBeInTheDocument();
+  expect(screen.getByText("已识别，等待换肤连接")).toBeInTheDocument();
 });

@@ -34,6 +34,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
 
         var configWriteAttempts = 0
         let service = CodexSyncService(
+            codexHomeWritesEnabled: true,
             writeSecureFile: { data, url in
                 if url == CodexPaths.configTomlURL {
                     configWriteAttempts += 1
@@ -97,7 +98,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authText = try String(contentsOf: CodexPaths.authURL, encoding: .utf8)
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
@@ -151,7 +152,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
         XCTAssertTrue(tomlText.contains(#"model = "gpt-5.6-luna""#))
@@ -198,7 +199,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
         XCTAssertFalse(tomlText.contains("model_context_window"))
@@ -233,7 +234,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
@@ -272,7 +273,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
@@ -308,7 +309,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
         XCTAssertTrue(tomlText.contains(#"openai_base_url = "http://localhost:1458/v1""#))
@@ -339,7 +340,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [provider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
         XCTAssertTrue(tomlText.contains(#"openai_base_url = "https://api.direct.invalid/v1""#))
@@ -443,7 +444,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [oauthProvider, compatibleProvider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
@@ -504,7 +505,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
 
         XCTAssertEqual(config.remoteConnectionAccount()?.id, "remote_only_local")
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
@@ -559,7 +560,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [oauthProvider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
@@ -602,7 +603,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [compatibleProvider]
         )
 
-        XCTAssertThrowsError(try CodexSyncService().synchronize(config: config)) { error in
+        XCTAssertThrowsError(try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)) { error in
             guard case CodexSyncError.missingRemoteConnectionAccount = error else {
                 XCTFail("Expected missingRemoteConnectionAccount, got \(error)")
                 return
@@ -656,7 +657,7 @@ final class CodexSyncServiceTests: CodexBarTestCase {
             providers: [oauthProvider, openRouterProvider]
         )
 
-        try CodexSyncService().synchronize(config: config)
+        try CodexSyncService(codexHomeWritesEnabled: true).synchronize(config: config)
 
         let authObject = try self.readAuthJSON()
         let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])

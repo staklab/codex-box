@@ -78,7 +78,7 @@ final class AppLifecycleDiagnosticsTests: XCTestCase {
         XCTAssertEqual(store.loadCount, 1)
         XCTAssertEqual(host.startCount, 1)
         XCTAssertEqual(usage.startCount, 1)
-        XCTAssertEqual(oauth.startCount, 1)
+        XCTAssertEqual(oauth.startCount, 0)
         XCTAssertEqual(updater.startCount, 1)
         XCTAssertEqual(events, ["legacy_menu_host_cleaned", "single_process_runtime_services_started"])
     }

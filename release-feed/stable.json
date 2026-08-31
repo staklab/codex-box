@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.8",
-    "publishedAt": "2026-08-26T06:46:43Z",
-    "summary": "首个公开版本：共享凭据只读、多账号隔离、主题市场与玻璃皮肤",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.8",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.8",
+    "version": "1.2.10",
+    "publishedAt": "2026-08-31T09:48:36Z",
+    "summary": "修复 Windows 换肤、自动识别 Codex Desktop，并消除页面切换抖动",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.10",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.10",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.8/codex-box-1.2.8-macOS.dmg",
-        "sha256": "ad234603b8d3423db2f6d027beb2d32850dd0a3944a9c33a7d9a832bd3393703"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.10/codex-box-1.2.10-macOS.dmg",
+        "sha256": "e6e181f0d46770fb376303584920777b563cfe70a28894329a6f967dad68eeff"
       }
     ]
   }

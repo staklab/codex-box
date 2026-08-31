@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE' >&2
 Usage:
-  scripts/package_dmg.sh --app /path/to/codex-box.app --version 1.2.9 [--output /path/to/file.dmg]
+  scripts/package_dmg.sh --app /path/to/codex-box.app --version 1.2.10 [--output /path/to/file.dmg]
 
 Creates a release DMG containing:
   - codex-box.app

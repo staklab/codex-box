@@ -78,15 +78,16 @@ function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlo
 
 function DesktopPanel({ dashboard, run }: { dashboard: Dashboard; run: (action: () => Promise<unknown>, success?: string) => Promise<void> }) {
   const [status, setStatus] = useState<DesktopStatus | null>(null);
-  const [path, setPath] = useState(dashboard.themeState.codexExecutable || "");
+  const [manualPath, setManualPath] = useState("");
   const [preset, setPreset] = useState<ThreadPreset>({ model: "gpt-5.6-sol", reasoningEffort: "medium", serviceTier: "flex", contextWindow: 272000 });
-  const refresh = useCallback(async () => { const next = await api.desktopStatus(); setStatus(next); setPreset(next.preset); setPath(next.codexExecutable || ""); }, []);
+  const refresh = useCallback(async () => { const next = await api.desktopStatus(); setStatus(next); setPreset(next.preset); }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   function field<K extends keyof ThreadPreset>(key: K, value: ThreadPreset[K]) { setPreset(current => ({ ...current, [key]: value })); }
   return <>
     <section><div className="section-title"><h2>Codex Desktop 连接</h2><span className={status?.connected ? "ok-pill" : ""}>{status?.connected ? "已连接" : "未连接"}</span><button className="section-action" onClick={() => void refresh()}>刷新</button></div>
-      <p className="section-hint">进程和 CDP 探测只在此页按需执行，不参与窗口打开和滚动渲染。</p>
-      <div className="field"><label>Codex.exe 路径</label><div className="inline-form"><input value={path} onChange={event => setPath(event.target.value)} placeholder="C:\…\Codex.exe" /><button onClick={() => void run(() => api.setCodexExecutable(path), "程序路径已保存")}>保存</button></div></div>
+      <p className="section-hint">自动识别运行中的 Codex/ChatGPT、PATH、常见安装目录与 Microsoft Store 安装包；探测只在进入此页或手动刷新时执行。</p>
+      <div className="field"><label>自动识别结果</label><div className="inline-form"><input readOnly value={status?.codexExecutable || "尚未识别到 Codex Desktop"} /><button onClick={() => void refresh()}>重新识别</button></div></div>
+      <details className="manual-path"><summary>自动识别不正确时手动指定</summary><div className="inline-form"><input value={manualPath} onChange={event => setManualPath(event.target.value)} placeholder="Codex.exe 或 ChatGPT.exe 的完整路径" /><button disabled={!manualPath.trim()} onClick={() => void run(() => api.setCodexExecutable(manualPath.trim()), "程序路径已保存").then(refresh)}>保存</button><button onClick={() => void run(() => api.setCodexExecutable(""), "已恢复自动识别").then(refresh)}>自动</button></div></details>
       <div className="status-grid"><div><span>设置目标</span><strong>{status?.target || "读取中…"}</strong></div><div><span>CDP 端口</span><strong>{status?.debugPort || "—"}</strong></div></div>
       <div className="settings-row"><div><strong>自动恢复主题</strong><small>启动 codex-box 后恢复已应用主题</small></div><input aria-label="自动恢复主题" type="checkbox" checked={dashboard.themeState.autoReapply} onChange={event => void run(() => api.setAutoReapply(event.target.checked), "主题恢复设置已保存")} /></div>
     </section>
@@ -150,16 +151,24 @@ function RecordsPanel({ showMessage }: { showMessage: (message: string) => void 
 
 export default function App() {
   const [dashboard, setDashboard] = useState(emptyDashboard); const [loading, setLoading] = useState(true); const [busyId, setBusyId] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [manualFlowId, setManualFlowId] = useState<string | null>(null);
+  const [visited, setVisited] = useState<Tab[]>(["overview"]);
   const load = useCallback(async () => { try { setDashboard(await api.dashboard()); } catch (error) { setMessage(String(error)); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const subscriptions = Promise.all([listen<Account>("oauth-completed", () => { setMessage("账号登录成功"); void load(); }), listen<string>("oauth-failed", event => setMessage(event.payload)), listen<string>("theme-applied", event => { setMessage(event.payload); void load(); }), listen("dashboard-changed", () => void load())]); return () => { void subscriptions.then(items => items.forEach(unlisten => unlisten())); }; }, [load]);
   async function run(action: () => Promise<unknown>, success?: string) { try { setMessage(null); await action(); if (success) setMessage(success); await load(); } catch (error) { setMessage(String(error)); } }
   async function login() { try { setMessage("正在等待浏览器完成登录…"); const flow = await api.startOAuth(); setManualFlowId(flow.flowId); await openUrl(flow.authUrl); } catch (error) { setMessage(String(error)); } }
+  function selectTab(next: Tab) { setVisited(current => current.includes(next) ? current : [...current, next]); setTab(next); }
   const labels: Array<[Tab, string]> = [["overview", "概览"], ["desktop", "桌面"], ["themes", "主题"], ["providers", "路由"], ["records", "记录"]];
   return <main className="app-frame"><header><div className="brand"><img src={appIcon} alt="codex-box" /><div><h1>codex-box</h1><p>Windows 系统托盘伴侣</p></div></div><span className="safety-badge">共享凭据只读</span></header>
-    <nav aria-label="功能导航">{labels.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</nav>
+    <nav aria-label="功能导航">{labels.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => selectTab(id)}>{label}</button>)}</nav>
     {message && <div className="notice" role="status">{message}<button aria-label="关闭提示" onClick={() => setMessage(null)}>×</button></div>}
-    <div className="content-scroll">{tab === "overview" && <Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} />}{tab === "desktop" && <DesktopPanel dashboard={dashboard} run={run} />}{tab === "themes" && <ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} />}{tab === "providers" && <ProvidersPanel dashboard={dashboard} run={run} />}{tab === "records" && <RecordsPanel showMessage={setMessage} />}</div>
+    <div className="content-stack">
+      {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} /></div>}
+      {visited.includes("desktop") && <div className={`content-scroll ${tab === "desktop" ? "active" : ""}`}><DesktopPanel dashboard={dashboard} run={run} /></div>}
+      {visited.includes("themes") && <div className={`content-scroll ${tab === "themes" ? "active" : ""}`}><ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} /></div>}
+      {visited.includes("providers") && <div className={`content-scroll ${tab === "providers" ? "active" : ""}`}><ProvidersPanel dashboard={dashboard} run={run} /></div>}
+      {visited.includes("records") && <div className={`content-scroll ${tab === "records" ? "active" : ""}`}><RecordsPanel showMessage={setMessage} /></div>}
+    </div>
     <footer>敏感凭据由 Windows Credential Manager 保护</footer>
   </main>;
 }

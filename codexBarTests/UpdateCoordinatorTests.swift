@@ -340,12 +340,12 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
         XCTAssertFalse(releaseVersion.isEmpty)
         XCTAssertEqual(feed.release.deliveryMode, .guidedDownload)
         XCTAssertTrue(feed.release.downloadPageURL.absoluteString.contains("/releases/tag/v\(releaseVersion)"))
-        XCTAssertEqual(feed.release.artifacts.count, 2)
+        XCTAssertEqual(feed.release.artifacts.count, 1)
         XCTAssertTrue(feed.release.artifacts.allSatisfy { $0.sha256?.isEmpty == false })
         XCTAssertTrue(feed.release.artifacts.allSatisfy {
             $0.downloadURL.absoluteString.contains("/releases/download/v\(releaseVersion)/")
         })
-        XCTAssertEqual(Set(feed.release.artifacts.map(\.format)), Set([.dmg, .zip]))
+        XCTAssertEqual(Set(feed.release.artifacts.map(\.format)), Set([.dmg]))
     }
 
     func testBootstrapGateKeeps115InGuidedMode() {

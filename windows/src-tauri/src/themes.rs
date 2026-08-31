@@ -444,32 +444,6 @@ pub fn load_definition(id: &str) -> anyhow::Result<(ThemeColors, PathBuf)> {
     Ok((colors, directory))
 }
 
-pub fn apply_native_colors(id: &str) -> anyhow::Result<()> {
-    let (colors, _) = load_definition(id)?;
-    let path = paths::codex_config_path()?;
-    let original = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut chrome = Vec::new();
-    put_color(&mut chrome, "accent", colors.accent.as_deref());
-    put_color(&mut chrome, "ink", colors.text.as_deref());
-    put_color(&mut chrome, "surface", colors.background.as_deref());
-    let mut semantic = Vec::new();
-    put_color(&mut semantic, "skill", colors.highlight.as_deref());
-    put_color(&mut semantic, "diffAdded", colors.secondary.as_deref());
-    put_color(&mut semantic, "diffRemoved", colors.accent_alt.as_deref());
-    let mut updated = original;
-    for table in [
-        "desktop.appearanceLightChromeTheme",
-        "desktop.appearanceDarkChromeTheme",
-    ] {
-        updated = config_edit::replace_table(&updated, table, &chrome);
-        if !semantic.is_empty() {
-            updated =
-                config_edit::replace_table(&updated, &format!("{table}.semanticColors"), &semantic);
-        }
-    }
-    config_edit::write_with_backup(&path, &updated, "config.toml.bak-codexbox-theme")
-}
-
 pub fn revert_native_colors() -> anyhow::Result<()> {
     let path = paths::codex_config_path()?;
     let mut updated = std::fs::read_to_string(&path).unwrap_or_default();
@@ -648,23 +622,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn normalized_hex(value: Option<&str>) -> Option<String> {
-    let value = value?.trim().trim_start_matches('#');
-    if (value.len() == 6 || value.len() == 8)
-        && value.chars().all(|character| character.is_ascii_hexdigit())
-    {
-        Some(format!("#{}", value.to_lowercase()))
-    } else {
-        None
-    }
-}
-
-fn put_color(lines: &mut Vec<String>, key: &str, value: Option<&str>) {
-    if let Some(value) = normalized_hex(value) {
-        lines.push(format!("{key} = \"{value}\""));
-    }
-}
-
 fn required_string(value: &Value, key: &str) -> anyhow::Result<String> {
     string(value, key).ok_or_else(|| anyhow::anyhow!("主题条目缺少 {key}"))
 }
@@ -727,12 +684,6 @@ mod tests {
     fn rejects_path_like_theme_ids() {
         assert_eq!(slug("../../evil"), "evil");
         assert_eq!(slug("合法-theme_1"), "-theme_1");
-    }
-
-    #[test]
-    fn validates_colors_before_writing_toml() {
-        assert_eq!(normalized_hex(Some("#AABBCC")), Some("#aabbcc".into()));
-        assert_eq!(normalized_hex(Some("red")), None);
     }
 
     #[test]

@@ -164,16 +164,10 @@ final class OpenAIOAuthRefreshServiceTests: CodexBarTestCase {
             return XCTFail("Expected refresh to succeed")
         }
 
-        let authObject = try self.readAuthJSON()
-        let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
-        let tomlText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
-
         XCTAssertEqual(updatedAccount.accessToken, "access-new")
-        XCTAssertEqual(tokens["access_token"] as? String, "access-new")
-        XCTAssertEqual(tokens["refresh_token"] as? String, "refresh-old")
-        XCTAssertEqual(authObject["client_id"] as? String, "app_refreshed_client")
         XCTAssertEqual(store.activeAccount()?.accessToken, "access-new")
-        XCTAssertTrue(tomlText.contains(#"model_provider = "openai""#))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.authURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.configTomlURL.path))
     }
 }
 

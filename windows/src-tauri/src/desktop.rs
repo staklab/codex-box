@@ -29,40 +29,168 @@ struct ThreadPresetFile {
 }
 
 pub fn find_codex_executable(configured: Option<&str>) -> Option<PathBuf> {
-    if let Some(path) = configured.map(PathBuf::from).filter(|path| path.is_file()) {
+    if let Some(path) = configured
+        .map(PathBuf::from)
+        .filter(|path| path.is_file() && is_supported_executable(path))
+    {
         return Some(path);
     }
+    if let Some(path) = find_running_desktop_executable() {
+        return Some(path);
+    }
+    let mut candidates = candidate_paths(
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+        std::env::var_os("ProgramFiles").as_deref(),
+        std::env::var_os("ProgramFiles(x86)").as_deref(),
+    );
+    candidates.extend(find_executables_on_path());
+    candidates
+        .into_iter()
+        .find(|path| path.is_file() && is_supported_executable(path))
+        .or_else(find_packaged_desktop_executable)
+}
+
+fn candidate_paths(
+    local: Option<&std::ffi::OsStr>,
+    program_files: Option<&std::ffi::OsStr>,
+    program_files_x86: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+    if let Some(local) = local {
         candidates.extend([
-            PathBuf::from(&local).join("Programs/Codex/Codex.exe"),
-            PathBuf::from(&local).join("OpenAI/Codex/Codex.exe"),
-            PathBuf::from(&local).join("Programs/OpenAI Codex/Codex.exe"),
+            PathBuf::from(local).join("Programs/Codex/Codex.exe"),
+            PathBuf::from(local).join("OpenAI/Codex/Codex.exe"),
+            PathBuf::from(local).join("Programs/OpenAI Codex/Codex.exe"),
+            PathBuf::from(local).join("Programs/ChatGPT/ChatGPT.exe"),
+            PathBuf::from(local).join("OpenAI/ChatGPT/ChatGPT.exe"),
+            PathBuf::from(local).join("Programs/OpenAI ChatGPT/ChatGPT.exe"),
+            PathBuf::from(local).join("Microsoft/WindowsApps/Codex.exe"),
+            PathBuf::from(local).join("Microsoft/WindowsApps/ChatGPT.exe"),
         ]);
     }
-    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
-        if let Ok(root) = std::env::var(variable) {
-            candidates.extend([
-                PathBuf::from(&root).join("Codex/Codex.exe"),
-                PathBuf::from(&root).join("OpenAI/Codex/Codex.exe"),
-            ]);
-        }
+    for root in [program_files, program_files_x86].into_iter().flatten() {
+        candidates.extend([
+            PathBuf::from(root).join("Codex/Codex.exe"),
+            PathBuf::from(root).join("OpenAI/Codex/Codex.exe"),
+            PathBuf::from(root).join("ChatGPT/ChatGPT.exe"),
+            PathBuf::from(root).join("OpenAI/ChatGPT/ChatGPT.exe"),
+        ]);
     }
-    candidates.into_iter().find(|path| path.is_file())
+    candidates
+}
+
+fn is_supported_executable(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe")
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn hidden_output(program: &str, args: &[&str]) -> Option<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    Command::new(program)
+        .args(args)
+        .creation_flags(0x08000000)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_lines(script: &str) -> Vec<String> {
+    hidden_output(
+        "powershell.exe",
+        &[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ],
+    )
+    .map(|output| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+fn find_running_desktop_executable() -> Option<PathBuf> {
+    powershell_lines("Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') -and $_.ExecutablePath } | Select-Object -ExpandProperty ExecutablePath -First 1")
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file() && is_supported_executable(path))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_running_desktop_executable() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_executables_on_path() -> Vec<PathBuf> {
+    ["Codex.exe", "ChatGPT.exe"]
+        .into_iter()
+        .filter_map(|name| hidden_output("where.exe", &[name]))
+        .flat_map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|line| PathBuf::from(line.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_executables_on_path() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn find_packaged_desktop_executable() -> Option<PathBuf> {
+    powershell_lines("Get-AppxPackage | Where-Object { $_.Name -match 'ChatGPT|Codex|OpenAI' } | ForEach-Object { Get-ChildItem -LiteralPath $_.InstallLocation -Filter '*.exe' -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') } | Select-Object -ExpandProperty FullName } | Select-Object -First 1")
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file() && is_supported_executable(path))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_packaged_desktop_executable() -> Option<PathBuf> {
+    None
 }
 
 pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Result<(u16, String)> {
     if let Some(port) = state.debug_port {
-        if !page_targets(port).await.unwrap_or_default().is_empty() {
-            let executable = state.codex_executable.clone().unwrap_or_default();
+        if healthy_main_target(port).await.is_ok() {
+            let executable = find_codex_executable(state.codex_executable.as_deref())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            return Ok((port, executable));
+        }
+    }
+    if let Some(port) = find_running_debug_port() {
+        if healthy_main_target(port).await.is_ok() {
+            let executable = find_codex_executable(state.codex_executable.as_deref())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
             return Ok((port, executable));
         }
     }
     let executable = find_codex_executable(state.codex_executable.as_deref())
-        .ok_or_else(|| anyhow::anyhow!("未找到 Codex.exe，请在桌面设置中填写程序路径"))?;
+        .ok_or_else(|| anyhow::anyhow!("未自动识别到 Codex Desktop，请确认已经安装或正在运行"))?;
+    if desktop_process_is_running(&executable) && !restart {
+        anyhow::bail!("Codex Desktop 正在以普通模式运行；请在主题页确认一次安全重启后再换肤")
+    }
     if restart {
         stop_exact_codex_process(&executable)?;
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
@@ -79,9 +207,17 @@ pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Res
             "no_proxy",
             merge_no_proxy(std::env::var("no_proxy").ok().as_deref()),
         );
+    if let Some(parent) = executable.parent() {
+        command.current_dir(parent);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
     command.spawn()?;
     for _ in 0..60 {
-        if !page_targets(port).await.unwrap_or_default().is_empty() {
+        if healthy_main_target(port).await.is_ok() {
             return Ok((port, executable.to_string_lossy().into_owned()));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -95,8 +231,15 @@ fn stop_exact_codex_process(executable: &Path) -> anyhow::Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow::anyhow!("Codex 程序路径无效"))?;
-    if !name.eq_ignore_ascii_case("Codex.exe") {
-        anyhow::bail!("仅允许重启 Codex.exe")
+    if !is_supported_executable(executable) {
+        anyhow::bail!("仅允许重启 Codex Desktop")
+    }
+    let _ = Command::new("taskkill").args(["/IM", name, "/T"]).output();
+    for _ in 0..20 {
+        if !desktop_process_is_running(executable) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
     let _ = Command::new("taskkill")
         .args(["/IM", name, "/T", "/F"])
@@ -107,6 +250,54 @@ fn stop_exact_codex_process(executable: &Path) -> anyhow::Result<()> {
 #[cfg(not(target_os = "windows"))]
 fn stop_exact_codex_process(_executable: &Path) -> anyhow::Result<()> {
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn desktop_process_is_running(executable: &Path) -> bool {
+    let Some(name) = executable.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    hidden_output(
+        "tasklist.exe",
+        &["/FI", &format!("IMAGENAME eq {name}"), "/NH"],
+    )
+    .is_some_and(|output| {
+        String::from_utf8_lossy(&output.stdout)
+            .to_lowercase()
+            .contains(&name.to_lowercase())
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn desktop_process_is_running(_executable: &Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn find_running_debug_port() -> Option<u16> {
+    powershell_lines("Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') -and $_.CommandLine } | Select-Object -ExpandProperty CommandLine")
+        .iter()
+        .find_map(|line| parse_debug_port(line))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_running_debug_port() -> Option<u16> {
+    None
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn parse_debug_port(command_line: &str) -> Option<u16> {
+    let marker = "--remote-debugging-port";
+    let remainder = command_line.split(marker).nth(1)?.trim_start();
+    let remainder = remainder
+        .strip_prefix('=')
+        .unwrap_or(remainder)
+        .trim_start();
+    let digits: String = remainder
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect();
+    digits.parse().ok().filter(|port| *port > 0)
 }
 
 fn merge_no_proxy(existing: Option<&str>) -> String {
@@ -157,6 +348,21 @@ async fn main_target(port: u16) -> anyhow::Result<CdpTarget> {
         .cloned()
         .or_else(|| targets.into_iter().next())
         .ok_or_else(|| anyhow::anyhow!("找不到 Codex 桌面主窗口"))
+}
+
+async fn healthy_main_target(port: u16) -> anyhow::Result<CdpTarget> {
+    let target = main_target(port).await?;
+    let health = evaluate_target(
+        &target,
+        "(() => { const text=(document.body?.innerText||'').toLowerCase(); if(text.includes('hit a snag')||text.includes('something went wrong')) return 'error-page'; return (window.electronBridge||window.__codexRoot)?'ready':'loading'; })()",
+        false,
+    )
+    .await?;
+    match health.as_str() {
+        Some("ready") => Ok(target),
+        Some("error-page") => anyhow::bail!("Codex Desktop 启动到了错误页，请先正常重启官方应用"),
+        _ => anyhow::bail!("Codex Desktop 页面仍在加载"),
+    }
 }
 
 async fn evaluate_target(
@@ -214,13 +420,8 @@ pub async fn inject_theme(id: &str, port: u16) -> anyhow::Result<()> {
         "(() => {{ const css=atob('{}'); let el=document.getElementById('codexbox-skin'); if(!el){{el=document.createElement('style');el.id='codexbox-skin';document.documentElement.appendChild(el);}} el.textContent=css; return 'ok'; }})()",
         encoded
     );
-    let targets = page_targets(port).await?;
-    if targets.is_empty() {
-        anyhow::bail!("Codex 调试目标不可用")
-    }
-    for target in &targets {
-        evaluate_target(target, &script, false).await?;
-    }
+    let target = healthy_main_target(port).await?;
+    evaluate_target(&target, &script, false).await?;
     Ok(())
 }
 
@@ -290,10 +491,18 @@ body::after{{content:none!important}}
 pub async fn desktop_status(state: &ThemeState, fallback: ThreadPreset) -> DesktopStatus {
     let executable = find_codex_executable(state.codex_executable.as_deref())
         .map(|path| path.to_string_lossy().into_owned());
-    let Some(port) = state.debug_port else {
+    let port = match state.debug_port {
+        Some(port) if healthy_main_target(port).await.is_ok() => Some(port),
+        _ => find_running_debug_port(),
+    };
+    let Some(port) = port else {
         return DesktopStatus {
             connected: false,
-            target: "未连接".into(),
+            target: if executable.is_some() {
+                "已识别，等待换肤连接".into()
+            } else {
+                "未识别到安装".into()
+            },
             conversation_id: None,
             preset: read_global_preset().unwrap_or(fallback),
             codex_executable: executable,
@@ -312,7 +521,7 @@ pub async fn desktop_status(state: &ThemeState, fallback: ThreadPreset) -> Deskt
         },
         Err(_) => DesktopStatus {
             connected: false,
-            target: "未连接".into(),
+            target: "已识别，调试连接不可用".into(),
             conversation_id: None,
             preset: read_global_preset().unwrap_or(fallback),
             codex_executable: executable,
@@ -498,5 +707,36 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_preset(&preset).is_err());
+    }
+
+    #[test]
+    fn supports_both_desktop_executable_names() {
+        assert!(is_supported_executable(Path::new("C:/Apps/Codex.exe")));
+        assert!(is_supported_executable(Path::new("C:/Apps/ChatGPT.exe")));
+        assert!(!is_supported_executable(Path::new("C:/Apps/codex-box.exe")));
+    }
+
+    #[test]
+    fn parses_debug_port_from_windows_command_line() {
+        assert_eq!(
+            parse_debug_port(r#"ChatGPT.exe --remote-debugging-port=54321"#),
+            Some(54321)
+        );
+        assert_eq!(
+            parse_debug_port(r#"Codex.exe --remote-debugging-port 49152"#),
+            Some(49152)
+        );
+        assert_eq!(parse_debug_port("Codex.exe"), None);
+    }
+
+    #[test]
+    fn automatic_candidates_include_chatgpt_and_codex() {
+        let paths = candidate_paths(
+            Some(std::ffi::OsStr::new("C:/Users/test/AppData/Local")),
+            Some(std::ffi::OsStr::new("C:/Program Files")),
+            None,
+        );
+        assert!(paths.iter().any(|path| path.ends_with("Codex.exe")));
+        assert!(paths.iter().any(|path| path.ends_with("ChatGPT.exe")));
     }
 }

@@ -13,7 +13,7 @@
 - OpenAI Compatible、OpenRouter Provider 与多密钥账号切换
 - 仅监听 `127.0.0.1` 的 Responses 流式账号/Provider 网关
 - 用量达到阈值后自动选择剩余用量更多的 OAuth 账号
-- 自动发现 Codex Desktop，通过随机回环 CDP 端口热注入 CSS 和壁纸
+- 自动识别运行中的 `Codex.exe`/`ChatGPT.exe`、PATH、常见安装目录与 Appx 安装包，通过随机回环 CDP 端口热注入 CSS 和壁纸
 - 当前会话或新会话默认的模型、推理强度、Service tier、上下文窗口设置
 - CodexPlusPlus Themes、DreamSkin.cc、Awesome Codex Skins、自定义 HTTPS 源与本地主题
 - `dreamskin://apply?version=...` 一键安装应用、启动链接补读与单实例转发
@@ -24,9 +24,10 @@
 
 - 市场每页最多渲染 24 张卡片，后端单页硬限制 48；DreamSkin 最多预取 5 页
 - 窗口采用单一滚动区，头部、导航和底部不会随大量主题反复重排
+- 页面首次打开后保留挂载与独立滚动位置，提示使用浮层展示，不触发布局和窗口尺寸变化
 - 主题包最大 64 MiB，壁纸注入最大 32 MiB
 - `.codexskin` 使用完整 SHA-256/首次安装摘要校验，并拒绝 ZIP 路径穿越
-- 修改 `config.toml` 前创建备份，采用临时文件替换并在失败时回滚
+- 会话默认参数修改 `config.toml` 前创建备份，采用临时文件替换并在失败时回滚；主题视觉只通过 CDP 注入
 - CDP 只绑定 `127.0.0.1` 随机端口，客户端明确绕过系统代理
 
 ## 本地开发

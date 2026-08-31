@@ -20,7 +20,7 @@ final class CodexBarOAuthAccountServiceTests: CodexBarTestCase {
         }
     }
 
-    func testImportActivatedAccountSynchronizesAuthAndConfig() throws {
+    func testImportActivatedAccountDoesNotRewriteSharedCodexFiles() throws {
         let service = CodexBarOAuthAccountService()
         let account = TokenAccount(
             email: "alice@example.com",
@@ -35,16 +35,8 @@ final class CodexBarOAuthAccountServiceTests: CodexBarTestCase {
         XCTAssertTrue(result.active)
         XCTAssertTrue(result.synchronized)
 
-        let authData = try Data(contentsOf: CodexPaths.authURL)
-        let authObject = try XCTUnwrap(JSONSerialization.jsonObject(with: authData) as? [String: Any])
-        let tokens = try XCTUnwrap(authObject["tokens"] as? [String: Any])
-        XCTAssertEqual(tokens["account_id"] as? String, "acct_alice")
-        XCTAssertEqual(tokens["access_token"] as? String, "access-token")
-
-        let configText = try String(contentsOf: CodexPaths.configTomlURL, encoding: .utf8)
-        XCTAssertTrue(configText.contains("model_provider = \"openai\""))
-        XCTAssertTrue(configText.contains("model = \"gpt-5.6-sol\""))
-        XCTAssertTrue(configText.contains("model_context_window = 1050000"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.authURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: CodexPaths.configTomlURL.path))
     }
 
     func testActivateAccountUpdatesActiveSelection() throws {

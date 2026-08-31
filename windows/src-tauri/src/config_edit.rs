@@ -36,6 +36,7 @@ pub fn remove_table(text: &str, table: &str) -> String {
     replace_table_inner(text, table, None)
 }
 
+#[cfg(test)]
 pub fn replace_table(text: &str, table: &str, body: &[String]) -> String {
     replace_table_inner(text, table, Some(body))
 }

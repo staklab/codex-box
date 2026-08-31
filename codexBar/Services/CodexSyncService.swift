@@ -27,6 +27,7 @@ enum CodexSyncError: LocalizedError {
 }
 
 struct CodexSyncService: CodexSynchronizing {
+    private let codexHomeWritesEnabled: Bool
     private let ensureDirectories: () throws -> Void
     private let backupFileIfPresent: (URL, URL) throws -> Void
     private let writeSecureFile: (Data, URL) throws -> Void
@@ -37,6 +38,7 @@ struct CodexSyncService: CodexSynchronizing {
     private static let remoteConnectionProviderName = "CodexbarRemote"
 
     init(
+        codexHomeWritesEnabled: Bool = Self.codexHomeWritesEnabled,
         ensureDirectories: @escaping () throws -> Void = { try CodexPaths.ensureDirectories() },
         backupFileIfPresent: @escaping (URL, URL) throws -> Void = { source, destination in
             try CodexPaths.backupFileIfPresent(from: source, to: destination)
@@ -58,6 +60,7 @@ struct CodexSyncService: CodexSynchronizing {
             try FileManager.default.removeItem(at: url)
         }
     ) {
+        self.codexHomeWritesEnabled = codexHomeWritesEnabled
         self.ensureDirectories = ensureDirectories
         self.backupFileIfPresent = backupFileIfPresent
         self.writeSecureFile = writeSecureFile
@@ -83,7 +86,7 @@ struct CodexSyncService: CodexSynchronizing {
     static let codexHomeWritesEnabled = false
 
     func synchronize(config: CodexBarConfig) throws {
-        guard Self.codexHomeWritesEnabled else { return }
+        guard self.codexHomeWritesEnabled else { return }
         let route = try CodexRouteResolver.resolve(config: config)
 
         let previousAuthData = self.readData(CodexPaths.authURL)
