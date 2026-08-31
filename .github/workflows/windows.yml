@@ -39,6 +39,17 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: 构建 EXE 和 MSI
         run: pnpm tauri build --bundles nsis,msi
+      - name: Windows 启动冒烟测试
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "src-tauri/target/release/codex-box-windows.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            throw "codex-box Windows 进程提前退出，退出码：$($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force
+          $process.WaitForExit()
       - name: 上传 Windows 安装包
         uses: actions/upload-artifact@v4
         with:
