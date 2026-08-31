@@ -13,6 +13,7 @@ beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.dashboard).mockResolvedValu
 
 test("renders account usage and local cost", async () => {
   render(<App />);
+  expect(screen.getByRole("img", { name: "codex-box" })).toBeInTheDocument();
   expect(await screen.findByText("test@example.com")).toBeInTheDocument();
   expect(screen.getByText("25%")).toBeInTheDocument();
   expect(screen.getByText("$0.02")).toBeInTheDocument();

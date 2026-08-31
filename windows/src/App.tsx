@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./api";
+import appIcon from "./assets/codex-box.png";
 import type { Account, Dashboard } from "./types";
 
 const emptyDashboard: Dashboard = {
@@ -106,7 +107,7 @@ export default function App() {
   }
 
   return <main className="app-shell">
-    <header><div className="brand"><span>CB</span><div><h1>codex-box</h1><p>Windows 系统托盘伴侣</p></div></div>
+    <header><div className="brand"><img src={appIcon} alt="codex-box" /><div><h1>codex-box</h1><p>Windows 系统托盘伴侣</p></div></div>
       <button className="primary" onClick={() => void login()}>＋ 添加账号</button></header>
 
     {message && <div className="notice" role="status">{message}<button aria-label="关闭提示" onClick={() => setMessage(null)}>×</button></div>}
