@@ -687,6 +687,25 @@ async fn install_market_theme(
 }
 
 #[tauri::command]
+async fn install_and_apply_market_theme(
+    context: tauri::State<'_, Arc<AppContext>>,
+    theme_id: String,
+    source_name: String,
+    restart_codex: bool,
+) -> Result<(), String> {
+    let listing = context
+        .theme_catalog
+        .lock()
+        .map_err(error_message)?
+        .iter()
+        .find(|item| item.id == theme_id && item.source_name == source_name)
+        .cloned()
+        .ok_or_else(|| "请先刷新主题市场".to_owned())?;
+    install_listing(context.inner(), listing).await?;
+    apply_installed_theme(context.inner(), theme_id, restart_codex).await
+}
+
+#[tauri::command]
 async fn install_dreamskin_version(
     context: tauri::State<'_, Arc<AppContext>>,
     version_id: String,
@@ -695,6 +714,20 @@ async fn install_dreamskin_version(
         .await
         .map_err(error_message)?;
     install_listing(context.inner(), listing).await
+}
+
+#[tauri::command]
+async fn install_and_apply_dreamskin_version(
+    context: tauri::State<'_, Arc<AppContext>>,
+    version_id: String,
+    restart_codex: bool,
+) -> Result<(), String> {
+    let listing = themes::fetch_dreamskin_version(&version_id)
+        .await
+        .map_err(error_message)?;
+    let theme_id = listing.id.clone();
+    install_listing(context.inner(), listing).await?;
+    apply_installed_theme(context.inner(), theme_id, restart_codex).await
 }
 
 async fn install_listing(context: &Arc<AppContext>, listing: ThemeListing) -> Result<(), String> {
@@ -1192,7 +1225,9 @@ pub fn run() {
             set_theme_source,
             add_theme_source,
             install_market_theme,
+            install_and_apply_market_theme,
             install_dreamskin_version,
+            install_and_apply_dreamskin_version,
             import_local_theme,
             apply_theme,
             revert_theme,

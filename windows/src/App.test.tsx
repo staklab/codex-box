@@ -5,7 +5,7 @@ import { api } from "./api";
 
 vi.mock("./api", () => ({ api: {
   dashboard: vi.fn(), startOAuth: vi.fn(), refreshUsage: vi.fn(), setActive: vi.fn(), removeAccount: vi.fn(), exportAccounts: vi.fn(), importAccounts: vi.fn(), createProfile: vi.fn(), launchProfile: vi.fn(), removeProfile: vi.fn(), startGateway: vi.fn(), stopGateway: vi.fn(), setStartAtLogin: vi.fn(), checkUpdate: vi.fn(),
-  createProvider: vi.fn(), removeProvider: vi.fn(), setActiveProvider: vi.fn(), addProviderAccount: vi.fn(), removeProviderAccount: vi.fn(), setActiveProviderAccount: vi.fn(), setAutoRoute: vi.fn(), records: vi.fn(), refreshThemes: vi.fn(), themePage: vi.fn(), setThemeSource: vi.fn(), addThemeSource: vi.fn(), installTheme: vi.fn(), installDreamSkin: vi.fn(), importLocalTheme: vi.fn(), applyTheme: vi.fn(), revertTheme: vi.fn(), uninstallTheme: vi.fn(), setAutoReapply: vi.fn(), setCodexExecutable: vi.fn(), desktopStatus: vi.fn(), updateDesktopSettings: vi.fn(),
+  createProvider: vi.fn(), removeProvider: vi.fn(), setActiveProvider: vi.fn(), addProviderAccount: vi.fn(), removeProviderAccount: vi.fn(), setActiveProviderAccount: vi.fn(), setAutoRoute: vi.fn(), records: vi.fn(), refreshThemes: vi.fn(), themePage: vi.fn(), setThemeSource: vi.fn(), addThemeSource: vi.fn(), installTheme: vi.fn(), installAndApplyTheme: vi.fn(), installDreamSkin: vi.fn(), installAndApplyDreamSkin: vi.fn(), importLocalTheme: vi.fn(), applyTheme: vi.fn(), revertTheme: vi.fn(), uninstallTheme: vi.fn(), setAutoReapply: vi.fn(), setCodexExecutable: vi.fn(), desktopStatus: vi.fn(), updateDesktopSettings: vi.fn(),
 } }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -35,6 +35,17 @@ test("creates a named isolated profile", async () => {
   await waitFor(() => expect(api.createProfile).toHaveBeenCalledWith("工作", "a1"));
 });
 
+test("keeps destructive confirmation inside the app before removing an account", async () => {
+  vi.mocked(api.removeAccount).mockResolvedValue();
+  render(<App />);
+  await screen.findByText("test@example.com");
+  fireEvent.click(screen.getByRole("button", { name: "移除" }));
+  expect(screen.getByRole("dialog", { name: "移除这个账号？" })).toBeInTheDocument();
+  expect(api.removeAccount).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  await waitFor(() => expect(api.removeAccount).toHaveBeenCalledWith("a1"));
+});
+
 test("renders only one bounded page for a large theme market", async () => {
   const items = Array.from({ length: 24 }, (_, index) => ({ id: `theme-${index}`, name: `主题 ${index}`, version: "1", author: null, description: null, license: null, tags: [], theme: "theme.json", preview: null, sourceBaseUrl: "https://example.com", sourceName: "测试源", isPack: false, declaredSha256: null, inlineColors: null, inlineAppearance: null }));
   vi.mocked(api.refreshThemes).mockResolvedValue({ items, total: 500, offset: 0, limit: 24, issues: [] });
@@ -44,7 +55,10 @@ test("renders only one bounded page for a large theme market", async () => {
   expect(await screen.findByText("主题 23")).toBeInTheDocument();
   expect(container.querySelectorAll(".theme-card")).toHaveLength(24);
   expect(screen.getByText("1 / 21")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "概览" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "安装并应用" }).find(button => !button.hasAttribute("disabled"))!);
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  await waitFor(() => expect(api.installAndApplyTheme).toHaveBeenCalledWith("theme-0", "测试源", true));
+  fireEvent.click(screen.getByRole("button", { name: "账号" }));
   fireEvent.click(screen.getByRole("button", { name: "主题" }));
   expect(container.querySelectorAll(".theme-card")).toHaveLength(24);
   expect(api.refreshThemes).toHaveBeenCalledTimes(1);

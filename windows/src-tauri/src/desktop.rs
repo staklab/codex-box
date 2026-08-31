@@ -244,7 +244,13 @@ fn stop_exact_codex_process(executable: &Path) -> anyhow::Result<()> {
     let _ = Command::new("taskkill")
         .args(["/IM", name, "/T", "/F"])
         .output();
-    Ok(())
+    for _ in 0..20 {
+        if !desktop_process_is_running(executable) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    anyhow::bail!("Codex Desktop 未能完全退出，请手动关闭后重试")
 }
 
 #[cfg(not(target_os = "windows"))]

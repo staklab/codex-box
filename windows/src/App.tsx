@@ -5,7 +5,8 @@ import { api } from "./api";
 import appIcon from "./assets/codex-box.png";
 import type { Account, Dashboard, DesktopStatus, RecordsSnapshot, ThemeListing, ThemePage, ThreadPreset } from "./types";
 
-type Tab = "overview" | "desktop" | "themes" | "providers" | "records";
+type Tab = "overview" | "desktop" | "themes" | "records";
+type ConfirmAction = (title: string, detail: string, danger?: boolean) => Promise<boolean>;
 
 const emptyDashboard: Dashboard = {
   accounts: [], profiles: [], providers: [], activeProviderId: null,
@@ -24,6 +25,21 @@ function Usage({ label, value }: { label: string; value: number }) {
   return <div className="usage"><div><span>{label}</span><b>{bounded.toFixed(0)}%</b></div><div className="track"><i className={usageColor(bounded)} style={{ width: `${bounded}%` }} /></div></div>;
 }
 
+function ConfirmDialog({ title, detail, danger, onResult }: { title: string; detail: string; danger: boolean; onResult: (value: boolean) => void }) {
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onResult(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [onResult]);
+  return <div className="dialog-layer" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onResult(false); }}>
+    <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <div className={`dialog-mark ${danger ? "danger" : ""}`}>{danger ? "!" : "✓"}</div>
+      <h2 id="dialog-title">{title}</h2><p>{detail}</p>
+      <div className="dialog-actions"><button autoFocus onClick={() => onResult(false)}>取消</button><button className={danger ? "danger-solid" : "primary"} onClick={() => onResult(true)}>确认</button></div>
+    </div>
+  </div>;
+}
+
 function AccountCard({ account, busy, onRefresh, onActivate, onRemove }: { account: Account; busy: boolean; onRefresh: () => void; onActivate: () => void; onRemove: () => void }) {
   return <article className={`account-card ${account.isActive ? "active" : ""}`}>
     <div className="account-head"><div><strong>{account.email || "OpenAI 账号"}</strong><span>{account.organizationName || account.planType.toUpperCase()}</span></div>{account.isActive && <em>当前</em>}</div>
@@ -32,9 +48,9 @@ function AccountCard({ account, busy, onRefresh, onActivate, onRemove }: { accou
   </article>;
 }
 
-function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlowId }: {
+function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlowId, confirmAction }: {
   dashboard: Dashboard; loading: boolean; busyId: string | null; setBusyId: (value: string | null) => void;
-  run: (action: () => Promise<unknown>, success?: string) => Promise<void>; login: () => Promise<void>; manualFlowId: string | null;
+  run: (action: () => Promise<unknown>, success?: string) => Promise<void>; login: () => Promise<void>; manualFlowId: string | null; confirmAction: ConfirmAction;
 }) {
   const [profileName, setProfileName] = useState("");
   const [transferPath, setTransferPath] = useState("");
@@ -47,12 +63,13 @@ function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlo
     setProfileName("");
   }
   return <>
-    <section><div className="section-title"><h2>OpenAI 账号</h2><span>{dashboard.accounts.length}</span><button className="section-action" onClick={() => void login()}>＋ 添加</button></div>
+    <section className="account-hero"><div className="section-title"><div><p className="eyebrow">多账号聚合</p><h2>OpenAI 账号</h2></div><span>{dashboard.accounts.length}</span><button className="section-action primary" onClick={() => void login()}>登录新账号</button></div>
+      <p className="section-hint">直接打开 OpenAI 官方登录页，完成后自动获取并保存该账号；无需接口地址或 API Key。</p>
       {loading ? <p className="empty">正在读取本地数据…</p> : dashboard.accounts.length === 0 ? <div className="empty"><b>还没有账号</b><p>通过浏览器 OAuth 登录；共享凭据保持只读。</p></div> :
         <div className="account-list">{dashboard.accounts.map(account => <AccountCard key={account.id} account={account} busy={busyId === account.id}
           onRefresh={() => { setBusyId(account.id); void run(() => api.refreshUsage(account.id)).finally(() => setBusyId(null)); }}
           onActivate={() => void run(() => api.setActive(account.id))}
-          onRemove={() => { if (confirm(`移除账号 ${account.email || account.id}？`)) void run(() => api.removeAccount(account.id)); }} />)}</div>}
+          onRemove={() => { void confirmAction("移除这个账号？", account.email || account.id, true).then(ok => { if (ok) void run(() => api.removeAccount(account.id)); }); }} />)}</div>}
     </section>
     <section><div className="section-title"><h2>高级账号管理</h2></div><p className="section-hint">兼容 rhino2api JSON 和旧版 CSV。导出文件包含敏感凭据，请只保存到可信位置。</p>
       <div className="inline-form"><input value={transferPath} onChange={event => setTransferPath(event.target.value)} placeholder="账号 JSON/CSV 的绝对路径" /><button disabled={!transferPath.trim()} onClick={() => void run(() => api.importAccounts(transferPath.trim()), "账号已安全导入")}>导入</button><button disabled={!transferPath.trim().toLowerCase().endsWith(".json")} onClick={() => void run(() => api.exportAccounts(transferPath.trim()), "账号已导出")}>导出</button></div>
@@ -64,7 +81,7 @@ function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlo
     </div></section>
     <section><div className="section-title"><h2>隔离运行档案</h2><span>{dashboard.profiles.length}</span></div>
       <div className="inline-form"><input value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void addProfile(); }} placeholder="例如：工作账号" maxLength={60} /><button onClick={() => void addProfile()}>创建</button></div>
-      <div className="profiles">{dashboard.profiles.map(profile => <div key={profile.id}><div><strong>{profile.name}</strong><small title={profile.codexHome}>{profile.codexHome}</small></div><button onClick={() => void run(() => api.launchProfile(profile.id), "Codex CLI 已启动")}>启动</button><button className="danger-button" onClick={() => { if (confirm(`删除运行档案“${profile.name}”及其隔离数据？`)) void run(() => api.removeProfile(profile.id)); }}>删除</button></div>)}</div>
+      <div className="profiles">{dashboard.profiles.map(profile => <div key={profile.id}><div><strong>{profile.name}</strong><small title={profile.codexHome}>{profile.codexHome}</small></div><button onClick={() => void run(() => api.launchProfile(profile.id), "Codex CLI 已启动")}>启动</button><button className="danger-button" onClick={() => { void confirmAction("删除运行档案？", `“${profile.name}”及其隔离数据将被删除。`, true).then(ok => { if (ok) void run(() => api.removeProfile(profile.id)); }); }}>删除</button></div>)}</div>
     </section>
     <section><div className="section-title"><h2>本地 Responses 网关</h2>{dashboard.gateway && <span>运行中</span>}</div>
       {dashboard.gateway ? <div className="gateway-status"><p>当前路由：{dashboard.gateway.accountEmail}</p><label>Base URL<input readOnly value={dashboard.gateway.baseUrl} /></label><label>本地密钥<input readOnly type="password" value={dashboard.gateway.apiKey} /></label><button className="danger-button" onClick={() => void run(() => api.stopGateway(), "网关已停止")}>停止网关</button></div> : <div className="gateway-status"><p>为当前 OAuth 账号或 Provider 建立仅监听回环地址的网关。</p><button onClick={() => void run(() => api.startGateway(), "网关已启动")}>启动网关</button></div>}
@@ -100,42 +117,32 @@ function DesktopPanel({ dashboard, run }: { dashboard: Dashboard; run: (action: 
 
 function ThemeCard({ item, installed, applied, busy, onInstall, onApply, onRemove }: { item: ThemeListing; installed: boolean; applied: boolean; busy: boolean; onInstall: () => void; onApply: () => void; onRemove: () => void }) {
   const colors = item.inlineColors ? Object.values(item.inlineColors).filter(Boolean).slice(0, 5) : [];
-  return <article className={`theme-card ${applied ? "applied" : ""}`}><div className="theme-head"><div><strong>{item.name}</strong><small>{item.author || item.sourceName} · {item.version}</small></div>{applied && <em>已应用</em>}</div>{colors.length > 0 && <div className="swatches">{colors.map((color, index) => <i key={`${color}-${index}`} style={{ background: color }} />)}</div>}<p>{item.description || item.tags.join(" · ") || "主题配色与壁纸"}</p><div className="card-actions">{installed ? <><button disabled={busy || applied} onClick={onApply}>{applied ? "使用中" : "应用"}</button><button className="danger-button" disabled={busy || applied} onClick={onRemove}>卸载</button></> : <button disabled={busy} onClick={onInstall}>{busy ? "处理中…" : "安装"}</button>}</div></article>;
+  return <article className={`theme-card ${applied ? "applied" : ""}`}><div className="theme-head"><div><strong>{item.name}</strong><small>{item.author || item.sourceName} · {item.version}</small></div>{applied && <em>使用中</em>}</div>{colors.length > 0 && <div className="swatches">{colors.map((color, index) => <i key={`${color}-${index}`} style={{ background: color }} />)}</div>}<p>{item.description || item.tags.join(" · ") || "主题配色与壁纸"}</p><div className="card-actions">{installed ? <><button disabled={busy || applied} onClick={onApply}>{busy ? "正在应用…" : applied ? "使用中" : "应用"}</button><button className="danger-button" disabled={busy || applied} onClick={onRemove}>卸载</button></> : <button className="primary" disabled={busy} onClick={onInstall}>{busy ? "下载并应用中…" : "安装并应用"}</button>}</div></article>;
 }
 
-function ThemesPanel({ dashboard, reload, showMessage }: { dashboard: Dashboard; reload: () => Promise<void>; showMessage: (value: string) => void }) {
+function ThemesPanel({ dashboard, reload, showMessage, confirmAction }: { dashboard: Dashboard; reload: () => Promise<void>; showMessage: (value: string) => void; confirmAction: ConfirmAction }) {
   const [page, setPage] = useState<ThemePage>({ items: [], total: 0, offset: 0, limit: 24, issues: [] });
   const [query, setQuery] = useState(""); const [busy, setBusy] = useState<string | null>(null); const [dreamId, setDreamId] = useState(""); const [localPath, setLocalPath] = useState(""); const [sourceName, setSourceName] = useState(""); const [sourceUrl, setSourceUrl] = useState(""); const [loaded, setLoaded] = useState(false);
   const installed = useMemo(() => new Set(dashboard.themeState.installed.map(item => item.id)), [dashboard.themeState.installed]);
   async function action(id: string, work: () => Promise<unknown>, message: string) { try { setBusy(id); await work(); await reload(); showMessage(message); } catch (error) { showMessage(String(error)); } finally { setBusy(null); } }
   async function refresh() { try { setBusy("market"); const next = await api.refreshThemes(query); setPage(next); setLoaded(true); } catch (error) { showMessage(String(error)); } finally { setBusy(null); } }
   async function move(offset: number) { try { setPage(await api.themePage(offset, page.limit, query)); } catch (error) { showMessage(String(error)); } }
+  async function allowRestart() { return Boolean(dashboard.themeState.debugPort) || confirmAction("需要重启 Codex Desktop", "首次换肤需要用安全的本地调试端口重新启动 Codex。未保存的输入内容可能丢失。", false); }
   const installedListings: ThemeListing[] = dashboard.themeState.installed.map(item => ({ id: item.id, name: item.name, version: item.version, author: null, description: item.hasImage ? "包含壁纸" : "配色主题", license: null, tags: [], theme: "", preview: null, sourceBaseUrl: "installed://", sourceName: "已安装", isPack: false, declaredSha256: null, inlineColors: null, inlineAppearance: null }));
   return <>
     <section><div className="section-title"><h2>已安装主题</h2><span>{installedListings.length}</span>{dashboard.themeState.appliedThemeId && <button className="section-action danger-button" onClick={() => void action("revert", api.revertTheme, "已恢复默认主题")}>恢复默认</button>}</div>
-      {installedListings.length === 0 ? <p className="empty">还没有安装主题</p> : <div className="theme-grid">{installedListings.map(item => <ThemeCard key={item.id} item={item} installed applied={dashboard.themeState.appliedThemeId === item.id} busy={busy === item.id} onInstall={() => {}} onApply={() => { const restart = !dashboard.themeState.debugPort && confirm("首次应用需要以安全的随机 CDP 端口启动 Codex，继续吗？"); if (dashboard.themeState.debugPort || restart) void action(item.id, () => api.applyTheme(item.id, restart), "主题已应用"); }} onRemove={() => { if (confirm(`卸载主题“${item.name}”？`)) void action(item.id, () => api.uninstallTheme(item.id), "主题已卸载"); }} />)}</div>}
+      {installedListings.length === 0 ? <p className="empty">还没有安装主题</p> : <div className="theme-grid">{installedListings.map(item => <ThemeCard key={item.id} item={item} installed applied={dashboard.themeState.appliedThemeId === item.id} busy={busy === item.id} onInstall={() => {}} onApply={() => { void allowRestart().then(ok => { if (ok) void action(item.id, () => api.applyTheme(item.id, !dashboard.themeState.debugPort), "主题已应用"); }); }} onRemove={() => { void confirmAction("卸载这个主题？", item.name, true).then(ok => { if (ok) void action(item.id, () => api.uninstallTheme(item.id), "主题已卸载"); }); }} />)}</div>}
     </section>
-    <section><div className="section-title"><h2>DreamSkin 与本地主题</h2></div><div className="stacked-forms"><div className="inline-form"><input value={dreamId} onChange={event => setDreamId(event.target.value)} placeholder="DreamSkin 版本 ID：ver_…" /><button disabled={!dreamId.trim() || busy !== null} onClick={() => void action("dream", () => api.installDreamSkin(dreamId.trim()), "DreamSkin 主题已安装")}>安装</button></div><div className="inline-form"><input value={localPath} onChange={event => setLocalPath(event.target.value)} placeholder="本地主题目录（包含 theme.json）" /><button disabled={!localPath.trim() || busy !== null} onClick={() => void action("local", () => api.importLocalTheme(localPath.trim()), "本地主题已导入")}>导入</button></div><button onClick={() => void openUrl("https://dreamskin.cc/gallery")}>打开 DreamSkin 画廊</button></div></section>
+    <section><div className="section-title"><h2>DreamSkin 与本地主题</h2></div><div className="stacked-forms"><div className="inline-form"><input value={dreamId} onChange={event => setDreamId(event.target.value)} placeholder="DreamSkin 版本 ID：ver_…" /><button disabled={!dreamId.trim() || busy !== null} onClick={() => { void allowRestart().then(ok => { if (ok) void action("dream", () => api.installAndApplyDreamSkin(dreamId.trim(), !dashboard.themeState.debugPort), "DreamSkin 已安装并应用"); }); }}>{busy === "dream" ? "处理中…" : "安装并应用"}</button></div><div className="inline-form"><input value={localPath} onChange={event => setLocalPath(event.target.value)} placeholder="本地主题目录（包含 theme.json）" /><button disabled={!localPath.trim() || busy !== null} onClick={() => void action("local", () => api.importLocalTheme(localPath.trim()), "本地主题已导入")}>导入</button></div><button onClick={() => void openUrl("https://dreamskin.cc/gallery")}>打开 DreamSkin 画廊</button></div></section>
     <section><div className="section-title"><h2>主题市场</h2>{loaded && <span>{page.total}</span>}<button className="section-action" disabled={busy === "market"} onClick={() => void refresh()}>{busy === "market" ? "加载中…" : "刷新市场"}</button></div>
       <div className="source-list">{dashboard.themeSources.map(source => <label key={source.id}><input type="checkbox" checked={source.enabled} onChange={event => void action(`source-${source.id}`, () => api.setThemeSource(source.id, event.target.checked), "主题源设置已保存")} /><span>{source.name}</span></label>)}</div>
       <div className="custom-source"><input value={sourceName} onChange={event => setSourceName(event.target.value)} placeholder="自定义源名称" /><input value={sourceUrl} onChange={event => setSourceUrl(event.target.value)} placeholder="https://…（包含 index.json）" /><button disabled={!sourceName.trim() || !sourceUrl.trim()} onClick={() => void action("source-add", () => api.addThemeSource(sourceName.trim(), sourceUrl.trim()), "主题源已添加")}>添加源</button></div>
       <div className="inline-form search-row"><input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void refresh(); }} placeholder="搜索名称、作者或标签" /><button onClick={() => void refresh()}>搜索</button></div>
       {page.issues.length > 0 && <div className="warning-box">{page.issues.map(issue => <p key={issue}>{issue}</p>)}</div>}
-      {!loaded ? <p className="empty">按需刷新市场；列表每页最多渲染 24 个主题。</p> : <div className="theme-grid">{page.items.map(item => <ThemeCard key={`${item.sourceName}-${item.id}`} item={item} installed={installed.has(item.id)} applied={dashboard.themeState.appliedThemeId === item.id} busy={busy === item.id} onInstall={() => void action(item.id, () => api.installTheme(item.id, item.sourceName), "主题已安装")} onApply={() => void action(item.id, () => api.applyTheme(item.id, true), "主题已应用")} onRemove={() => void action(item.id, () => api.uninstallTheme(item.id), "主题已卸载")} />)}</div>}
+      {!loaded ? <p className="empty">按需刷新市场；列表每页最多渲染 24 个主题。</p> : <div className="theme-grid">{page.items.map(item => <ThemeCard key={`${item.sourceName}-${item.id}`} item={item} installed={installed.has(item.id)} applied={dashboard.themeState.appliedThemeId === item.id} busy={busy === item.id} onInstall={() => { void allowRestart().then(ok => { if (ok) void action(item.id, () => api.installAndApplyTheme(item.id, item.sourceName, !dashboard.themeState.debugPort), "主题已安装并应用"); }); }} onApply={() => { void allowRestart().then(ok => { if (ok) void action(item.id, () => api.applyTheme(item.id, !dashboard.themeState.debugPort), "主题已应用"); }); }} onRemove={() => { void confirmAction("卸载这个主题？", item.name, true).then(ok => { if (ok) void action(item.id, () => api.uninstallTheme(item.id), "主题已卸载"); }); }} />)}</div>}
       {loaded && page.total > page.limit && <div className="pager"><button disabled={page.offset === 0} onClick={() => void move(Math.max(0, page.offset - page.limit))}>上一页</button><span>{Math.floor(page.offset / page.limit) + 1} / {Math.ceil(page.total / page.limit)}</span><button disabled={page.offset + page.limit >= page.total} onClick={() => void move(page.offset + page.limit)}>下一页</button></div>}
     </section>
   </>;
-}
-
-function ProvidersPanel({ dashboard, run }: { dashboard: Dashboard; run: (action: () => Promise<unknown>, success?: string) => Promise<void> }) {
-  const [form, setForm] = useState({ label: "", kind: "openAiCompatible", baseUrl: "https://api.openai.com/v1", model: "", accountLabel: "默认", apiKey: "" });
-  const [accountProviderId, setAccountProviderId] = useState(""); const [accountLabel, setAccountLabel] = useState(""); const [accountKey, setAccountKey] = useState("");
-  function set(key: keyof typeof form, value: string) { setForm(current => ({ ...current, [key]: value })); }
-  async function create() { await run(() => api.createProvider(form), "Provider 已保存"); setForm(current => ({ ...current, apiKey: "" })); }
-  return <><section><div className="section-title"><h2>请求路由</h2></div><p className="section-hint">密钥存入 Windows Credential Manager；公开配置只保存 Provider 元数据。</p>
-    <div className="provider-list"><label className={dashboard.activeProviderId === null ? "active" : ""}><input type="radio" checked={dashboard.activeProviderId === null} onChange={() => void run(() => api.setActiveProvider(null), "已选择 OpenAI OAuth 路由")} /><div><strong>OpenAI OAuth</strong><small>使用当前 OAuth 账号</small></div></label>{dashboard.providers.map(provider => <div className={`provider-block ${dashboard.activeProviderId === provider.id ? "active" : ""}`} key={provider.id}><div className="provider-route"><input aria-label={`激活 ${provider.label}`} type="radio" checked={dashboard.activeProviderId === provider.id} onChange={() => void run(() => api.setActiveProvider(provider.id), "Provider 已激活")} /><div><strong>{provider.label}</strong><small>{provider.model} · {provider.baseUrl}</small></div><button className="danger-button" onClick={() => { if (confirm(`删除 Provider“${provider.label}”？`)) void run(() => api.removeProvider(provider.id)); }}>删除</button></div><div className="provider-accounts">{provider.accounts.map(account => <label key={account.id}><input type="radio" checked={provider.activeAccountId === account.id} onChange={() => void run(() => api.setActiveProviderAccount(provider.id, account.id), "Provider 账号已切换")} /><span>{account.label}</span><button className="danger-button" onClick={event => { event.preventDefault(); if (confirm(`删除账号“${account.label}”？`)) void run(() => api.removeProviderAccount(provider.id, account.id)); }}>移除</button></label>)}</div></div>)}</div>
-    {dashboard.providers.length > 0 && <div className="provider-account-form"><select value={accountProviderId} onChange={event => setAccountProviderId(event.target.value)}><option value="">选择 Provider</option>{dashboard.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select><input value={accountLabel} onChange={event => setAccountLabel(event.target.value)} placeholder="账号名称" /><input type="password" value={accountKey} onChange={event => setAccountKey(event.target.value)} placeholder="API Key" /><button disabled={!accountProviderId || !accountLabel.trim() || !accountKey.trim()} onClick={() => void run(() => api.addProviderAccount(accountProviderId, accountLabel.trim(), accountKey.trim()), "Provider 账号已添加").then(() => { setAccountLabel(""); setAccountKey(""); })}>添加账号</button></div>}
-  </section><section><div className="section-title"><h2>添加 Provider</h2></div><div className="form-grid"><label>名称<input value={form.label} onChange={event => set("label", event.target.value)} /></label><label>类型<select value={form.kind} onChange={event => set("kind", event.target.value)}><option value="openAiCompatible">OpenAI Compatible</option><option value="openRouter">OpenRouter</option></select></label><label className="span-2">Base URL<input value={form.baseUrl} onChange={event => set("baseUrl", event.target.value)} /></label><label>模型 ID<input value={form.model} onChange={event => set("model", event.target.value)} /></label><label>账号名称<input value={form.accountLabel} onChange={event => set("accountLabel", event.target.value)} /></label><label className="span-2">API Key<input type="password" value={form.apiKey} onChange={event => set("apiKey", event.target.value)} /></label></div><button className="primary wide" onClick={() => void create()}>安全保存</button></section></>;
 }
 
 function RecordsPanel({ showMessage }: { showMessage: (message: string) => void }) {
@@ -152,23 +159,26 @@ function RecordsPanel({ showMessage }: { showMessage: (message: string) => void 
 export default function App() {
   const [dashboard, setDashboard] = useState(emptyDashboard); const [loading, setLoading] = useState(true); const [busyId, setBusyId] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [manualFlowId, setManualFlowId] = useState<string | null>(null);
   const [visited, setVisited] = useState<Tab[]>(["overview"]);
+  const [confirmation, setConfirmation] = useState<{ title: string; detail: string; danger: boolean; resolve: (value: boolean) => void } | null>(null);
   const load = useCallback(async () => { try { setDashboard(await api.dashboard()); } catch (error) { setMessage(String(error)); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const subscriptions = Promise.all([listen<Account>("oauth-completed", () => { setMessage("账号登录成功"); void load(); }), listen<string>("oauth-failed", event => setMessage(event.payload)), listen<string>("theme-applied", event => { setMessage(event.payload); void load(); }), listen("dashboard-changed", () => void load())]); return () => { void subscriptions.then(items => items.forEach(unlisten => unlisten())); }; }, [load]);
   async function run(action: () => Promise<unknown>, success?: string) { try { setMessage(null); await action(); if (success) setMessage(success); await load(); } catch (error) { setMessage(String(error)); } }
   async function login() { try { setMessage("正在等待浏览器完成登录…"); const flow = await api.startOAuth(); setManualFlowId(flow.flowId); await openUrl(flow.authUrl); } catch (error) { setMessage(String(error)); } }
+  const confirmAction: ConfirmAction = (title, detail, danger = false) => new Promise(resolve => setConfirmation({ title, detail, danger, resolve }));
+  function finishConfirmation(value: boolean) { confirmation?.resolve(value); setConfirmation(null); }
   function selectTab(next: Tab) { setVisited(current => current.includes(next) ? current : [...current, next]); setTab(next); }
-  const labels: Array<[Tab, string]> = [["overview", "概览"], ["desktop", "桌面"], ["themes", "主题"], ["providers", "路由"], ["records", "记录"]];
-  return <main className="app-frame"><header><div className="brand"><img src={appIcon} alt="codex-box" /><div><h1>codex-box</h1><p>Windows 系统托盘伴侣</p></div></div><span className="safety-badge">共享凭据只读</span></header>
+  const labels: Array<[Tab, string]> = [["overview", "账号"], ["desktop", "桌面"], ["themes", "主题"], ["records", "记录"]];
+  return <main className="app-frame"><header><div className="brand"><img src={appIcon} alt="codex-box" /><div><h1>codex-box</h1><p>Windows</p></div></div><span className="safety-badge">本地安全存储</span></header>
     <nav aria-label="功能导航">{labels.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => selectTab(id)}>{label}</button>)}</nav>
     {message && <div className="notice" role="status">{message}<button aria-label="关闭提示" onClick={() => setMessage(null)}>×</button></div>}
     <div className="content-stack">
-      {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} /></div>}
+      {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} confirmAction={confirmAction} /></div>}
       {visited.includes("desktop") && <div className={`content-scroll ${tab === "desktop" ? "active" : ""}`}><DesktopPanel dashboard={dashboard} run={run} /></div>}
-      {visited.includes("themes") && <div className={`content-scroll ${tab === "themes" ? "active" : ""}`}><ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} /></div>}
-      {visited.includes("providers") && <div className={`content-scroll ${tab === "providers" ? "active" : ""}`}><ProvidersPanel dashboard={dashboard} run={run} /></div>}
+      {visited.includes("themes") && <div className={`content-scroll ${tab === "themes" ? "active" : ""}`}><ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} confirmAction={confirmAction} /></div>}
       {visited.includes("records") && <div className={`content-scroll ${tab === "records" ? "active" : ""}`}><RecordsPanel showMessage={setMessage} /></div>}
     </div>
     <footer>敏感凭据由 Windows Credential Manager 保护</footer>
+    {confirmation && <ConfirmDialog title={confirmation.title} detail={confirmation.detail} danger={confirmation.danger} onResult={finishConfirmation} />}
   </main>;
 }
