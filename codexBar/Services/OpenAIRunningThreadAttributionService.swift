@@ -130,11 +130,17 @@ struct OpenAIRunningThreadAttributionService {
         let activations = self.switchJournalStore.activationHistory()
         let aggregateRouteHistory = self.aggregateRouteJournalStore.routeHistory()
         let sessionLogStore = self.sessionLogStoreProvider()
-        let sessionRecordsByID = Dictionary(
-            uniqueKeysWithValues: sessionLogStore
-                .currentSessionLifecycleRecords(matchingSessionIDs: relevantSessionIDs)
-                .map { ($0.id, $0) }
-        )
+        let sessionRecordsByID = sessionLogStore
+            .currentSessionLifecycleRecords(matchingSessionIDs: relevantSessionIDs)
+            .reduce(into: [String: SessionLogStore.SessionLifecycleRecord]()) { records, candidate in
+                guard let existing = records[candidate.id] else {
+                    records[candidate.id] = candidate
+                    return
+                }
+                if Self.shouldPrefer(candidate, over: existing) {
+                    records[candidate.id] = candidate
+                }
+            }
         var threads: [OpenAIRunningThreadAttribution.ThreadAttribution] = []
         var runningThreadCounts: [String: Int] = [:]
         var unknownThreadCount = 0
@@ -211,5 +217,19 @@ struct OpenAIRunningThreadAttributionService {
         }
 
         return accountID
+    }
+
+    private static func shouldPrefer(
+        _ candidate: SessionLogStore.SessionLifecycleRecord,
+        over existing: SessionLogStore.SessionLifecycleRecord
+    ) -> Bool {
+        if candidate.lastActivityAt != existing.lastActivityAt {
+            return candidate.lastActivityAt > existing.lastActivityAt
+        }
+        if candidate.startedAt != existing.startedAt {
+            return candidate.startedAt > existing.startedAt
+        }
+        return candidate.taskLifecycleState == .completed &&
+            existing.taskLifecycleState != .completed
     }
 }
