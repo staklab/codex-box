@@ -43,6 +43,7 @@ enum L {
         zh ? "当前为 \(currentVersion)，现在可以继续下载或安装 \(latestVersion)。" : "You're on \(currentVersion). Download or install \(latestVersion) now."
     }
     static var menuUpdateAction: String { zh ? "更新" : "Update" }
+    static var menuUpdateRestartAction: String { zh ? "重启更新" : "Restart to Update" }
     static var addAccount: String      { zh ? "添加账号"            : "Add Account" }
     static var openAICSVToolbar: String { zh ? "导入或导出 OpenAI 账号" : "Import or Export OpenAI Accounts" }
     static func codexLaunchSwitchedInstanceStarted(_ account: String) -> String {
@@ -151,11 +152,8 @@ enum L {
     static func updateErrorNoCompatibleArtifact(_ architecture: String) -> String {
         zh ? "最新稳定版本中缺少适用于 \(architecture) 的安装包。" : "The latest stable release does not contain a compatible installer for \(architecture)."
     }
-    static func updateErrorFailedToOpenDownloadURL(_ url: String) -> String {
-        zh ? "无法打开下载链接：\(url)" : "Failed to open the download URL: \(url)"
-    }
     static var updateErrorAutomaticUpdateUnavailable: String {
-        zh ? "当前构建尚未接入可执行的自动更新引擎。" : "An executable automatic update engine is not available in this build."
+        zh ? "此更新暂时无法在应用内自动安装。" : "This update cannot currently be installed in-app."
     }
     static var updateErrorMissingArtifactDigest: String { zh ? "更新包缺少 SHA-256 校验值。" : "The update artifact is missing a SHA-256 digest." }
     static var updateErrorArtifactDigestMismatch: String { zh ? "更新包校验失败，已停止安装。" : "The update artifact digest does not match; installation was stopped." }
@@ -164,6 +162,22 @@ enum L {
     static func updateErrorInvalidBundle(_ message: String) -> String { zh ? "更新应用验证失败：\(message)" : "Update app validation failed: \(message)" }
     static func updateErrorInstallPermissionDenied(_ path: String) -> String { zh ? "没有权限在 \(path) 中替换应用。" : "The app cannot be replaced in \(path) because it is not writable." }
     static func updateErrorHelperLaunchFailed(_ message: String) -> String { zh ? "无法启动更新替换程序：\(message)" : "Failed to launch the update replacement helper: \(message)" }
+    static var updateErrorNotPrepared: String { zh ? "更新尚未下载并验证，请重新准备更新。" : "The update has not been downloaded and verified yet. Prepare it again." }
+    static func updatePromptDownloadTitle(_ version: String) -> String { zh ? "发现 codex-box \(version)" : "codex-box \(version) is Available" }
+    static func updatePromptDownloadMessage(_ currentVersion: String, _ latestVersion: String) -> String {
+        zh
+            ? "当前版本为 \(currentVersion)。是否在后台下载并验证 \(latestVersion)？下载完成后会再次询问是否重启，安装由应用自动完成。"
+            : "You are running \(currentVersion). Download and verify \(latestVersion) in the background? You will be asked again before restarting, and the app will complete installation automatically."
+    }
+    static var updatePromptDownloadConfirm: String { zh ? "后台下载" : "Download in Background" }
+    static func updatePromptRestartTitle(_ version: String) -> String { zh ? "codex-box \(version) 已准备好" : "codex-box \(version) is Ready" }
+    static var updatePromptRestartMessage: String {
+        zh
+            ? "更新已下载并通过校验。立即重启会退出并无痕替换 codex-box，然后自动重新打开；正在通过本地网关运行的请求可能会被中断。是否立即重启？"
+            : "The update has been downloaded and verified. Restarting now will quit, replace, and reopen codex-box automatically. Requests currently using the local gateway may be interrupted. Restart now?"
+    }
+    static var updatePromptRestartConfirm: String { zh ? "立即重启" : "Restart Now" }
+    static var updatePromptLater: String { zh ? "稍后" : "Later" }
     nonisolated static var updateValidationUnreadableBundle: String { zh ? "无法读取应用信息" : "Unable to read app bundle metadata" }
     nonisolated static var updateValidationBundleIdentifierMismatch: String { zh ? "Bundle Identifier 不一致" : "Bundle identifier mismatch" }
     nonisolated static func updateValidationVersionMismatch(_ actual: String, _ expected: String) -> String { zh ? "版本为 \(actual)，预期为 \(expected)" : "Version is \(actual), expected \(expected)" }
@@ -189,7 +203,8 @@ enum L {
     static var settingsUpdatesStatusTitle: String { zh ? "更新状态" : "Update Status" }
     static var settingsUpdatesUnknownVersion: String { zh ? "尚未检查" : "Not Checked Yet" }
     static var settingsUpdatesCheckAction: String { zh ? "检查 GitHub 上的最新稳定版本" : "Check the Latest Stable Version on GitHub" }
-    static var settingsUpdatesInstallAction: String { zh ? "下载、安装并重启" : "Download, Install, and Restart" }
+    static var settingsUpdatesInstallAction: String { zh ? "后台下载并准备更新" : "Download and Prepare Update" }
+    static var settingsUpdatesRestartAction: String { zh ? "重启并完成更新" : "Restart and Finish Update" }
     static var settingsUpdatesChecking: String { zh ? "正在检查 GitHub 上的最新稳定版本…" : "Checking the latest stable version on GitHub..." }
     static var settingsUpdatesIdle: String { zh ? "尚未发起更新检查。" : "No update check has been started yet." }
     static var settingsUpdatesSourceNote: String {
@@ -209,7 +224,10 @@ enum L {
         zh ? "当前版本 \(currentVersion)，GitHub 上可用最新稳定版本 \(latestVersion)。" : "Current version \(currentVersion); the latest stable version on GitHub is \(latestVersion)."
     }
     static func settingsUpdatesExecuting(_ version: String) -> String {
-        zh ? "正在处理 \(version) 的更新动作。" : "Processing the update action for \(version)."
+        zh ? "正在后台下载并验证 \(version)。" : "Downloading and verifying \(version) in the background."
+    }
+    static func settingsUpdatesReadyToRestart(_ version: String) -> String {
+        zh ? "\(version) 已下载并通过校验，等待你确认重启。" : "\(version) has been downloaded and verified and is waiting for restart confirmation."
     }
     static func settingsUpdatesFailed(_ message: String) -> String {
         zh ? "更新失败：\(message)" : "Update failed: \(message)"

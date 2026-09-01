@@ -17,7 +17,8 @@
 - 当前会话或新会话默认的模型、推理强度、Service tier、上下文窗口设置
 - CodexPlusPlus Themes、DreamSkin.cc、Awesome Codex Skins、自定义 HTTPS 源与本地主题
 - `dreamskin://apply?version=...` 一键安装应用、启动链接补读与单实例转发
-- 系统托盘、关闭到托盘、开机启动和 GitHub Release 更新检查
+- 系统托盘、关闭到托盘和开机启动
+- 启动后自动检查 GitHub Release、应用内后台下载并校验安装包，安装重启前单独确认
 - NSIS `.exe` 与 WiX `.msi` 安装包
 
 ## 主题稳定性与安全

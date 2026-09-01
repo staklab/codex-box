@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./api";
 import appIcon from "./assets/codex-box.png";
-import type { Account, Dashboard, DesktopStatus, RecordsSnapshot, ThemeListing, ThemePage, ThreadPreset } from "./types";
+import type { Account, Dashboard, DesktopStatus, RecordsSnapshot, ThemeListing, ThemePage, ThreadPreset, UpdateDownloadProgress, UpdateInfo } from "./types";
 
 type Tab = "overview" | "desktop" | "themes" | "records";
-type ConfirmAction = (title: string, detail: string, danger?: boolean) => Promise<boolean>;
+type ConfirmAction = (title: string, detail: string, danger?: boolean, cancelLabel?: string, confirmLabel?: string) => Promise<boolean>;
+type UpdatePhase = "idle" | "checking" | "downloading" | "ready" | "installing";
 
 const emptyDashboard: Dashboard = {
   accounts: [], profiles: [], providers: [], activeProviderId: null,
@@ -25,7 +26,7 @@ function Usage({ label, value }: { label: string; value: number }) {
   return <div className="usage"><div><span>{label}</span><b>{bounded.toFixed(0)}%</b></div><div className="track"><i className={usageColor(bounded)} style={{ width: `${bounded}%` }} /></div></div>;
 }
 
-function ConfirmDialog({ title, detail, danger, onResult }: { title: string; detail: string; danger: boolean; onResult: (value: boolean) => void }) {
+function ConfirmDialog({ title, detail, danger, cancelLabel, confirmLabel, onResult }: { title: string; detail: string; danger: boolean; cancelLabel: string; confirmLabel: string; onResult: (value: boolean) => void }) {
   useEffect(() => {
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") onResult(false); };
     window.addEventListener("keydown", close);
@@ -35,7 +36,7 @@ function ConfirmDialog({ title, detail, danger, onResult }: { title: string; det
     <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
       <div className={`dialog-mark ${danger ? "danger" : ""}`}>{danger ? "!" : "✓"}</div>
       <h2 id="dialog-title">{title}</h2><p>{detail}</p>
-      <div className="dialog-actions"><button autoFocus onClick={() => onResult(false)}>取消</button><button className={danger ? "danger-solid" : "primary"} onClick={() => onResult(true)}>确认</button></div>
+      <div className="dialog-actions"><button autoFocus onClick={() => onResult(false)}>{cancelLabel}</button><button className={danger ? "danger-solid" : "primary"} onClick={() => onResult(true)}>{confirmLabel}</button></div>
     </div>
   </div>;
 }
@@ -48,9 +49,10 @@ function AccountCard({ account, busy, onRefresh, onActivate, onRemove }: { accou
   </article>;
 }
 
-function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlowId, confirmAction }: {
+function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlowId, confirmAction, updateLabel, onUpdateAction }: {
   dashboard: Dashboard; loading: boolean; busyId: string | null; setBusyId: (value: string | null) => void;
   run: (action: () => Promise<unknown>, success?: string) => Promise<void>; login: () => Promise<void>; manualFlowId: string | null; confirmAction: ConfirmAction;
+  updateLabel: string; onUpdateAction: () => void;
 }) {
   const [profileName, setProfileName] = useState("");
   const [transferPath, setTransferPath] = useState("");
@@ -89,7 +91,7 @@ function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlo
     <section><div className="section-title"><h2>应用设置</h2></div><div className="settings-row"><div><strong>登录 Windows 后启动</strong><small>启动后驻留系统托盘</small></div><input aria-label="登录 Windows 后启动" type="checkbox" checked={dashboard.startAtLogin} onChange={event => void run(() => api.setStartAtLogin(event.target.checked))} /></div>
       <div className="settings-row"><div><strong>用量自动路由</strong><small>达到阈值时切换到可用量更多的 OAuth 账号</small></div><input aria-label="用量自动路由" type="checkbox" checked={dashboard.autoRouteEnabled} onChange={event => void run(() => api.setAutoRoute(event.target.checked, dashboard.autoRouteThreshold), "自动路由设置已保存")} /></div>
       <div className="settings-row"><div><strong>切换阈值</strong><small>{dashboard.autoRouteThreshold.toFixed(0)}%</small></div><input aria-label="自动路由阈值" className="range" type="range" min="50" max="100" value={dashboard.autoRouteThreshold} onChange={event => void run(() => api.setAutoRoute(dashboard.autoRouteEnabled, Number(event.target.value)))} /></div>
-      <div className="settings-row"><div><strong>软件更新</strong><small>从 GitHub Release 获取 Windows 安装包</small></div><button onClick={() => void run(async () => { const update = await api.checkUpdate(); if (update) await openUrl(update.downloadUrl); }, "更新检查完成")}>检查更新</button></div></section>
+      <div className="settings-row"><div><strong>软件更新</strong><small>自动检查、校验并在确认后安装</small></div><button onClick={onUpdateAction}>{updateLabel}</button></div></section>
   </>;
 }
 
@@ -159,26 +161,68 @@ function RecordsPanel({ showMessage }: { showMessage: (message: string) => void 
 export default function App() {
   const [dashboard, setDashboard] = useState(emptyDashboard); const [loading, setLoading] = useState(true); const [busyId, setBusyId] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [manualFlowId, setManualFlowId] = useState<string | null>(null);
   const [visited, setVisited] = useState<Tab[]>(["overview"]);
-  const [confirmation, setConfirmation] = useState<{ title: string; detail: string; danger: boolean; resolve: (value: boolean) => void } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ title: string; detail: string; danger: boolean; cancelLabel: string; confirmLabel: string; resolve: (value: boolean) => void } | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
+  const updatePhaseRef = useRef<UpdatePhase>("idle");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
+  useEffect(() => { updatePhaseRef.current = updatePhase; }, [updatePhase]);
   const load = useCallback(async () => { try { setDashboard(await api.dashboard()); } catch (error) { setMessage(String(error)); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { const subscriptions = Promise.all([listen<Account>("oauth-completed", () => { setMessage("账号登录成功"); void load(); }), listen<string>("oauth-failed", event => setMessage(event.payload)), listen<string>("theme-applied", event => { setMessage(event.payload); void load(); }), listen("dashboard-changed", () => void load())]); return () => { void subscriptions.then(items => items.forEach(unlisten => unlisten())); }; }, [load]);
+  useEffect(() => { const subscriptions = Promise.all([listen<Account>("oauth-completed", () => { setMessage("账号登录成功"); void load(); }), listen<string>("oauth-failed", event => setMessage(event.payload)), listen<string>("theme-applied", event => { setMessage(event.payload); void load(); }), listen("dashboard-changed", () => void load()), listen<UpdateDownloadProgress>("update-download-progress", event => setUpdateProgress(event.payload))]); return () => { void subscriptions.then(items => items.forEach(unlisten => unlisten())); }; }, [load]);
   async function run(action: () => Promise<unknown>, success?: string) { try { setMessage(null); await action(); if (success) setMessage(success); await load(); } catch (error) { setMessage(String(error)); } }
   async function login() { try { setMessage("正在等待浏览器完成登录…"); const flow = await api.startOAuth(); setManualFlowId(flow.flowId); await openUrl(flow.authUrl); } catch (error) { setMessage(String(error)); } }
-  const confirmAction: ConfirmAction = (title, detail, danger = false) => new Promise(resolve => setConfirmation({ title, detail, danger, resolve }));
+  const confirmAction: ConfirmAction = useCallback((title, detail, danger = false, cancelLabel = "取消", confirmLabel = "确认") => new Promise(resolve => setConfirmation({ title, detail, danger, cancelLabel, confirmLabel, resolve })), []);
   function finishConfirmation(value: boolean) { confirmation?.resolve(value); setConfirmation(null); }
+  const installReadyUpdate = useCallback(async (version: string) => {
+    const accepted = await confirmAction(`安装 v${version} 并重启？`, "安装将在应用退出后自动完成，随后自动启动新版本。", false, "稍后", "安装并重启");
+    if (!accepted) return;
+    try { setUpdatePhase("installing"); await api.installUpdate(); }
+    catch (error) { setUpdatePhase("ready"); setMessage(String(error)); }
+  }, [confirmAction]);
+  const downloadAvailableUpdate = useCallback(async (info: UpdateInfo) => {
+    try {
+      setUpdatePhase("downloading"); setUpdateProgress({ downloaded: 0, total: info.size });
+      const prepared = await api.downloadUpdate();
+      setUpdatePhase("ready"); setUpdateProgress(null);
+      await installReadyUpdate(prepared.version);
+    } catch (error) { setUpdatePhase("idle"); setUpdateProgress(null); setMessage(String(error)); }
+  }, [installReadyUpdate]);
+  const checkForUpdate = useCallback(async (manual = false) => {
+    if (updatePhaseRef.current !== "idle") return;
+    try {
+      setUpdatePhase("checking");
+      const info = await api.checkUpdate();
+      if (!info) { setUpdatePhase("idle"); if (manual) setMessage("当前已是最新 Windows 版本"); return; }
+      setUpdateInfo(info); setUpdatePhase("idle");
+      const size = info.size > 0 ? `（${(info.size / 1024 / 1024).toFixed(1)} MB）` : "";
+      const accepted = await confirmAction(`发现新版本 v${info.version}`, `是否现在后台下载更新${size}？下载期间可继续使用。`, false, "稍后", "后台下载");
+      if (accepted) await downloadAvailableUpdate(info);
+    } catch (error) { setUpdatePhase("idle"); if (manual) setMessage(String(error)); }
+  }, [confirmAction, downloadAvailableUpdate]);
+  useEffect(() => {
+    const startup = window.setTimeout(() => void checkForUpdate(false), 1500);
+    const daily = window.setInterval(() => void checkForUpdate(false), 24 * 60 * 60 * 1000);
+    return () => { window.clearTimeout(startup); window.clearInterval(daily); };
+  }, [checkForUpdate]);
+  const updateLabel = updatePhase === "checking" ? "检查中…" : updatePhase === "downloading" ? `下载中 ${updateProgress?.total ? Math.min(100, Math.floor(updateProgress.downloaded / updateProgress.total * 100)) : 0}%` : updatePhase === "ready" ? "安装并重启" : updatePhase === "installing" ? "正在退出…" : updateInfo ? `下载 v${updateInfo.version}` : "检查更新";
+  function handleUpdateAction() {
+    if (updatePhase === "ready" && updateInfo) void installReadyUpdate(updateInfo.version);
+    else if (updatePhase === "idle" && updateInfo) void downloadAvailableUpdate(updateInfo);
+    else if (updatePhase === "idle") void checkForUpdate(true);
+  }
   function selectTab(next: Tab) { setVisited(current => current.includes(next) ? current : [...current, next]); setTab(next); }
   const labels: Array<[Tab, string]> = [["overview", "账号"], ["desktop", "桌面"], ["themes", "主题"], ["records", "记录"]];
   return <main className="app-frame"><header><div className="brand"><img src={appIcon} alt="codex-box" /><div><h1>codex-box</h1><p>Windows</p></div></div><span className="safety-badge">本地安全存储</span></header>
     <nav aria-label="功能导航">{labels.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => selectTab(id)}>{label}</button>)}</nav>
     {message && <div className="notice" role="status">{message}<button aria-label="关闭提示" onClick={() => setMessage(null)}>×</button></div>}
     <div className="content-stack">
-      {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} confirmAction={confirmAction} /></div>}
+      {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} confirmAction={confirmAction} updateLabel={updateLabel} onUpdateAction={handleUpdateAction} /></div>}
       {visited.includes("desktop") && <div className={`content-scroll ${tab === "desktop" ? "active" : ""}`}><DesktopPanel dashboard={dashboard} run={run} /></div>}
       {visited.includes("themes") && <div className={`content-scroll ${tab === "themes" ? "active" : ""}`}><ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} confirmAction={confirmAction} /></div>}
       {visited.includes("records") && <div className={`content-scroll ${tab === "records" ? "active" : ""}`}><RecordsPanel showMessage={setMessage} /></div>}
     </div>
     <footer>敏感凭据由 Windows Credential Manager 保护</footer>
-    {confirmation && <ConfirmDialog title={confirmation.title} detail={confirmation.detail} danger={confirmation.danger} onResult={finishConfirmation} />}
+    {confirmation && <ConfirmDialog title={confirmation.title} detail={confirmation.detail} danger={confirmation.danger} cancelLabel={confirmation.cancelLabel} confirmLabel={confirmation.confirmLabel} onResult={finishConfirmation} />}
   </main>;
 }

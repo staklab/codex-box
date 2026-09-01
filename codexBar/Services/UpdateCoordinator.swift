@@ -13,7 +13,6 @@ enum AppUpdateError: LocalizedError {
     case unexpectedStatusCode(Int)
     case noInstallableStableRelease
     case noCompatibleArtifact(UpdateArtifactArchitecture)
-    case failedToOpenDownloadURL(URL)
     case automaticUpdateUnavailable
     case missingArtifactDigest
     case artifactDigestMismatch
@@ -22,6 +21,7 @@ enum AppUpdateError: LocalizedError {
     case invalidUpdateBundle(String)
     case updateInstallPermissionDenied(String)
     case updateHelperLaunchFailed(String)
+    case updateNotPrepared
 
     var errorDescription: String? {
         switch self {
@@ -39,8 +39,6 @@ enum AppUpdateError: LocalizedError {
             return L.updateErrorNoInstallableStableRelease
         case let .noCompatibleArtifact(architecture):
             return L.updateErrorNoCompatibleArtifact(architecture.displayName)
-        case let .failedToOpenDownloadURL(url):
-            return L.updateErrorFailedToOpenDownloadURL(url.absoluteString)
         case .automaticUpdateUnavailable:
             return L.updateErrorAutomaticUpdateUnavailable
         case .missingArtifactDigest:
@@ -57,6 +55,8 @@ enum AppUpdateError: LocalizedError {
             return L.updateErrorInstallPermissionDenied(path)
         case let .updateHelperLaunchFailed(message):
             return L.updateErrorHelperLaunchFailed(message)
+        case .updateNotPrepared:
+            return L.updateErrorNotPrepared
         }
     }
 }
@@ -88,7 +88,15 @@ protocol AppUpdateCapabilityEvaluating {
 }
 
 protocol AppUpdateActionExecuting {
-    func execute(_ availability: AppUpdateAvailability) async throws
+    func prepare(_ availability: AppUpdateAvailability) async throws
+    func installAndRelaunch(_ availability: AppUpdateAvailability) async throws
+    func discardPreparedUpdate()
+}
+
+@MainActor
+protocol AppUpdatePrompting {
+    func confirmDownload(_ availability: AppUpdateAvailability) -> Bool
+    func confirmRestart(_ availability: AppUpdateAvailability) -> Bool
 }
 
 protocol AppUpdateAutomaticCheckCancelling {
@@ -152,6 +160,40 @@ struct TaskBasedAutomaticCheckScheduler: AppUpdateAutomaticCheckScheduling {
 
         return TaskBasedAutomaticCheckHandle(task: task)
     }
+}
+
+@MainActor
+struct LiveAppUpdatePrompter: AppUpdatePrompting {
+    func confirmDownload(_ availability: AppUpdateAvailability) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L.updatePromptDownloadTitle(availability.release.version)
+        alert.informativeText = L.updatePromptDownloadMessage(
+            availability.currentVersion,
+            availability.release.version
+        )
+        alert.addButton(withTitle: L.updatePromptDownloadConfirm)
+        alert.addButton(withTitle: L.updatePromptLater)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    func confirmRestart(_ availability: AppUpdateAvailability) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L.updatePromptRestartTitle(availability.release.version)
+        alert.informativeText = L.updatePromptRestartMessage
+        alert.addButton(withTitle: L.updatePromptRestartConfirm)
+        alert.addButton(withTitle: L.updatePromptLater)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+}
+
+@MainActor
+struct NoninteractiveAppUpdatePrompter: AppUpdatePrompting {
+    func confirmDownload(_: AppUpdateAvailability) -> Bool { false }
+    func confirmRestart(_: AppUpdateAvailability) -> Bool { false }
 }
 
 struct LiveAppUpdateEnvironment: AppUpdateEnvironmentProviding {
@@ -403,11 +445,28 @@ enum AppUpdateArtifactSelector {
 
 actor AppUpdateInstaller {
     private let fileManager = FileManager.default
+    private var preparedUpdate: PreparedUpdate?
 
-    func prepareAndLaunch(
+    private struct PreparedUpdate {
+        var version: String
+        var workURL: URL
+        var extractedBundleURL: URL
+        var currentBundleURL: URL
+    }
+
+    func prepare(
         availability: AppUpdateAvailability,
         currentBundleURL: URL
     ) async throws {
+        if let preparedUpdate = self.preparedUpdate,
+           preparedUpdate.version == availability.release.version,
+           preparedUpdate.currentBundleURL.standardizedFileURL == currentBundleURL.standardizedFileURL,
+           self.fileManager.fileExists(atPath: preparedUpdate.extractedBundleURL.path) {
+            return
+        }
+
+        self.discardPreparedUpdate()
+
         guard availability.selectedArtifact.hasValidSHA256,
               let expectedDigest = availability.selectedArtifact.sha256?.lowercased() else {
             throw AppUpdateError.missingArtifactDigest
@@ -440,15 +499,41 @@ actor AppUpdateInstaller {
                 replacing: currentBundleURL,
                 expectedVersion: availability.release.version
             )
-            try self.stageAndLaunchHelper(
+            self.preparedUpdate = PreparedUpdate(
+                version: availability.release.version,
+                workURL: workURL,
                 extractedBundleURL: extractedBundleURL,
-                currentBundleURL: currentBundleURL,
-                workURL: workURL
+                currentBundleURL: currentBundleURL.standardizedFileURL
             )
         } catch {
             try? self.fileManager.removeItem(at: workURL)
             throw error
         }
+    }
+
+    func installAndLaunch(
+        availability: AppUpdateAvailability,
+        currentBundleURL: URL
+    ) throws {
+        guard let preparedUpdate = self.preparedUpdate,
+              preparedUpdate.version == availability.release.version,
+              preparedUpdate.currentBundleURL == currentBundleURL.standardizedFileURL,
+              self.fileManager.fileExists(atPath: preparedUpdate.extractedBundleURL.path) else {
+            throw AppUpdateError.updateNotPrepared
+        }
+
+        try self.stageAndLaunchHelper(
+            extractedBundleURL: preparedUpdate.extractedBundleURL,
+            currentBundleURL: currentBundleURL,
+            workURL: preparedUpdate.workURL
+        )
+        self.preparedUpdate = nil
+    }
+
+    func discardPreparedUpdate() {
+        guard let preparedUpdate = self.preparedUpdate else { return }
+        self.preparedUpdate = nil
+        try? self.fileManager.removeItem(at: preparedUpdate.workURL)
     }
 
     private func extractBundle(
@@ -637,20 +722,34 @@ struct LiveAppUpdateActionExecutor: AppUpdateActionExecuting {
     var environment: AppUpdateEnvironmentProviding
     var installer = AppUpdateInstaller()
 
-    func execute(_ availability: AppUpdateAvailability) async throws {
+    func prepare(_ availability: AppUpdateAvailability) async throws {
         guard availability.isAutomaticUpdateAllowed else {
-            guard NSWorkspace.shared.open(availability.selectedArtifact.downloadURL) else {
-                throw AppUpdateError.failedToOpenDownloadURL(availability.selectedArtifact.downloadURL)
-            }
-            return
+            throw AppUpdateError.automaticUpdateUnavailable
         }
 
-        try await self.installer.prepareAndLaunch(
+        try await self.installer.prepare(
+            availability: availability,
+            currentBundleURL: self.environment.bundleURL
+        )
+    }
+
+    func installAndRelaunch(_ availability: AppUpdateAvailability) async throws {
+        guard availability.isAutomaticUpdateAllowed else {
+            throw AppUpdateError.automaticUpdateUnavailable
+        }
+
+        try await self.installer.installAndLaunch(
             availability: availability,
             currentBundleURL: self.environment.bundleURL
         )
         await MainActor.run {
             NSApp.terminate(nil)
+        }
+    }
+
+    func discardPreparedUpdate() {
+        Task {
+            await self.installer.discardPreparedUpdate()
         }
     }
 }
@@ -666,11 +765,13 @@ final class UpdateCoordinator: ObservableObject {
     private let environment: AppUpdateEnvironmentProviding
     private let capabilityEvaluator: AppUpdateCapabilityEvaluating
     private let actionExecutor: AppUpdateActionExecuting
+    private let updatePrompter: AppUpdatePrompting
     private let automaticCheckScheduler: AppUpdateAutomaticCheckScheduling
     private let automaticCheckInterval: TimeInterval
 
     private var hasStarted = false
     private var automaticCheckHandle: AppUpdateAutomaticCheckCancelling?
+    private var lastAutomaticallyOfferedVersion: String?
 
     convenience init() {
         let environment = LiveAppUpdateEnvironment()
@@ -684,6 +785,7 @@ final class UpdateCoordinator: ObservableObject {
                 allowsDigestVerifiedUpdatesWithoutTrustedSignature: true
             ),
             actionExecutor: LiveAppUpdateActionExecutor(environment: environment),
+            updatePrompter: LiveAppUpdatePrompter(),
             automaticCheckScheduler: TaskBasedAutomaticCheckScheduler(),
             automaticCheckInterval: defaultAutomaticUpdateCheckInterval
         )
@@ -700,6 +802,23 @@ final class UpdateCoordinator: ObservableObject {
             environment: environment,
             capabilityEvaluator: capabilityEvaluator,
             actionExecutor: actionExecutor,
+            updatePrompter: NoninteractiveAppUpdatePrompter()
+        )
+    }
+
+    convenience init(
+        releaseLoader: AppUpdateReleaseLoading,
+        environment: AppUpdateEnvironmentProviding,
+        capabilityEvaluator: AppUpdateCapabilityEvaluating,
+        actionExecutor: AppUpdateActionExecuting,
+        updatePrompter: AppUpdatePrompting
+    ) {
+        self.init(
+            releaseLoader: releaseLoader,
+            environment: environment,
+            capabilityEvaluator: capabilityEvaluator,
+            actionExecutor: actionExecutor,
+            updatePrompter: updatePrompter,
             automaticCheckScheduler: TaskBasedAutomaticCheckScheduler(),
             automaticCheckInterval: defaultAutomaticUpdateCheckInterval
         )
@@ -710,6 +829,7 @@ final class UpdateCoordinator: ObservableObject {
         environment: AppUpdateEnvironmentProviding,
         capabilityEvaluator: AppUpdateCapabilityEvaluating,
         actionExecutor: AppUpdateActionExecuting,
+        updatePrompter: AppUpdatePrompting,
         automaticCheckScheduler: AppUpdateAutomaticCheckScheduling,
         automaticCheckInterval: TimeInterval
     ) {
@@ -717,12 +837,16 @@ final class UpdateCoordinator: ObservableObject {
         self.environment = environment
         self.capabilityEvaluator = capabilityEvaluator
         self.actionExecutor = actionExecutor
+        self.updatePrompter = updatePrompter
         self.automaticCheckScheduler = automaticCheckScheduler
         self.automaticCheckInterval = automaticCheckInterval
     }
 
     var isChecking: Bool {
         if case .checking = self.state {
+            return true
+        }
+        if case .executing = self.state {
             return true
         }
         return false
@@ -747,12 +871,17 @@ final class UpdateCoordinator: ObservableObject {
     func stop() {
         self.automaticCheckHandle?.cancel()
         self.automaticCheckHandle = nil
+        self.actionExecutor.discardPreparedUpdate()
         self.hasStarted = false
     }
 
     func handleToolbarAction() async {
         if let pendingAvailability = self.pendingAvailability {
-            await self.execute(pendingAvailability)
+            if case .readyToRestart = self.state {
+                await self.requestRestart(for: pendingAvailability)
+            } else {
+                await self.prepareUpdate(pendingAvailability)
+            }
         } else {
             await self.checkForUpdates(trigger: .manual)
         }
@@ -767,7 +896,25 @@ final class UpdateCoordinator: ObservableObject {
             let release = try await self.releaseLoader.loadLatestRelease()
             if let availability = try self.resolveAvailability(from: release) {
                 self.pendingAvailability = availability
-                self.state = .updateAvailable(availability)
+                let updateWasAlreadyPrepared: Bool
+                if case let .readyToRestart(preparedAvailability) = self.state,
+                   preparedAvailability.release.version == availability.release.version {
+                    updateWasAlreadyPrepared = true
+                    self.state = .readyToRestart(availability)
+                } else {
+                    updateWasAlreadyPrepared = false
+                    self.state = .updateAvailable(availability)
+                }
+
+                if trigger != .manual,
+                   updateWasAlreadyPrepared == false,
+                   availability.isAutomaticUpdateAllowed,
+                   self.lastAutomaticallyOfferedVersion != availability.release.version {
+                    self.lastAutomaticallyOfferedVersion = availability.release.version
+                    if self.updatePrompter.confirmDownload(availability) {
+                        await self.prepareUpdate(availability)
+                    }
+                }
             } else {
                 self.pendingAvailability = nil
                 self.state = .upToDate(
@@ -808,16 +955,40 @@ final class UpdateCoordinator: ObservableObject {
         )
     }
 
-    private func execute(_ availability: AppUpdateAvailability) async {
+    private func prepareUpdate(_ availability: AppUpdateAvailability) async {
+        guard availability.isAutomaticUpdateAllowed else {
+            let blockers = availability.blockers.map(\.localizedDescription)
+            self.state = .failed(
+                blockers.isEmpty ? AppUpdateError.automaticUpdateUnavailable.localizedDescription : blockers.joined(separator: "\n")
+            )
+            return
+        }
+
         self.state = .executing(availability)
 
         do {
-            try await self.actionExecutor.execute(availability)
+            try await self.actionExecutor.prepare(availability)
             self.pendingAvailability = availability
-            self.state = .updateAvailable(availability)
+            self.state = .readyToRestart(availability)
+            await self.requestRestart(for: availability)
         } catch {
             let message = error.localizedDescription
             self.state = .failed(message)
+        }
+    }
+
+    private func requestRestart(for availability: AppUpdateAvailability) async {
+        guard self.updatePrompter.confirmRestart(availability) else {
+            self.pendingAvailability = availability
+            self.state = .readyToRestart(availability)
+            return
+        }
+
+        self.state = .executing(availability)
+        do {
+            try await self.actionExecutor.installAndRelaunch(availability)
+        } catch {
+            self.state = .failed(error.localizedDescription)
         }
     }
 }

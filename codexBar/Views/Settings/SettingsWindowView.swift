@@ -329,6 +329,8 @@ private struct SettingsUpdatesPage: View {
             return availability.release.version
         case let .updateAvailable(availability):
             return availability.release.version
+        case let .readyToRestart(availability):
+            return availability.release.version
         case .idle, .checking, .failed:
             return L.settingsUpdatesUnknownVersion
         }
@@ -349,9 +351,18 @@ private struct SettingsUpdatesPage: View {
             )
         case let .executing(availability):
             return L.settingsUpdatesExecuting(availability.release.version)
+        case let .readyToRestart(availability):
+            return L.settingsUpdatesReadyToRestart(availability.release.version)
         case let .failed(message):
             return L.settingsUpdatesFailed(message)
         }
+    }
+
+    private var isReadyToRestart: Bool {
+        if case .readyToRestart = self.updateCoordinator.state {
+            return true
+        }
+        return false
     }
 
     var body: some View {
@@ -386,7 +397,7 @@ private struct SettingsUpdatesPage: View {
                 .disabled(self.updateCoordinator.isChecking)
 
                 if self.updateCoordinator.pendingAvailability != nil {
-                    Button(L.settingsUpdatesInstallAction) {
+                    Button(self.isReadyToRestart ? L.settingsUpdatesRestartAction : L.settingsUpdatesInstallAction) {
                         Task { await self.updateCoordinator.handleToolbarAction() }
                     }
                     .disabled(self.updateCoordinator.isChecking)

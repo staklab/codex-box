@@ -1209,13 +1209,20 @@ struct MenuBarView: View {
 
             Spacer(minLength: 8)
 
-            Button(L.menuUpdateAction) {
+            Button(self.isUpdateReadyToRestart ? L.menuUpdateRestartAction : L.menuUpdateAction) {
                 Task { await self.updateCoordinator.handleToolbarAction() }
             }
             .disabled(self.updateCoordinator.isChecking)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private var isUpdateReadyToRestart: Bool {
+        if case .readyToRestart = self.updateCoordinator.state {
+            return true
+        }
+        return false
     }
 
     private func openAIAvailabilityBadge(title: String) -> some View {

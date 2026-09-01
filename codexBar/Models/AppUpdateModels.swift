@@ -287,6 +287,7 @@ enum UpdateCoordinatorState: Equatable {
     case upToDate(currentVersion: String, checkedVersion: String)
     case updateAvailable(AppUpdateAvailability)
     case executing(AppUpdateAvailability)
+    case readyToRestart(AppUpdateAvailability)
     case failed(String)
 }
 

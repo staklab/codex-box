@@ -30,6 +30,7 @@ struct AppContext {
     gateway: Mutex<Option<gateway::GatewayRuntime>>,
     theme_catalog: Mutex<Vec<ThemeListing>>,
     theme_issues: Mutex<Vec<String>>,
+    ready_update: Mutex<Option<update::ReadyInstaller>>,
 }
 
 #[derive(Serialize)]
@@ -1033,6 +1034,35 @@ async fn check_update(app: tauri::AppHandle) -> Result<Option<update::UpdateInfo
 }
 
 #[tauri::command]
+async fn download_update(
+    app: tauri::AppHandle,
+    context: tauri::State<'_, Arc<AppContext>>,
+) -> Result<update::PreparedUpdate, String> {
+    let installer = update::download(&app, &app.package_info().version.to_string())
+        .await
+        .map_err(error_message)?;
+    let prepared = update::prepared(&installer);
+    *context.ready_update.lock().map_err(error_message)? = Some(installer);
+    Ok(prepared)
+}
+
+#[tauri::command]
+fn install_update(
+    app: tauri::AppHandle,
+    context: tauri::State<'_, Arc<AppContext>>,
+) -> Result<(), String> {
+    let installer = context
+        .ready_update
+        .lock()
+        .map_err(error_message)?
+        .clone()
+        .ok_or_else(|| "更新尚未下载完成".to_owned())?;
+    update::launch_installer(&installer).map_err(error_message)?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn remove_profile(
     context: tauri::State<'_, Arc<AppContext>>,
     profile_id: String,
@@ -1126,6 +1156,7 @@ pub fn run() {
             gateway: Mutex::new(None),
             theme_catalog: Mutex::new(Vec::new()),
             theme_issues: Mutex::new(Vec::new()),
+            ready_update: Mutex::new(None),
         }))
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};
@@ -1212,6 +1243,8 @@ pub fn run() {
             stop_gateway,
             set_start_at_login,
             check_update,
+            download_update,
+            install_update,
             create_provider,
             remove_provider,
             set_active_provider,

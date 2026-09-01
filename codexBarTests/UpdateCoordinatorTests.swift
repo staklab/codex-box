@@ -32,7 +32,7 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
     }
 
     func testToolbarActionExecutesPendingUpdateWithoutRefetching() async {
-        let releaseLoader = MockReleaseLoader(release: self.makeRelease(version: "1.1.7"))
+        let releaseLoader = MockReleaseLoader(release: self.makeAutomaticRelease(version: "1.1.7"))
         let executor = MockUpdateExecutor()
 
         let coordinator = UpdateCoordinator(
@@ -41,9 +41,7 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
                 currentVersion: "1.1.5",
                 architecture: .arm64
             ),
-            capabilityEvaluator: MockCapabilityEvaluator(
-                blockers: [.guidedDownloadOnlyRelease]
-            ),
+            capabilityEvaluator: MockCapabilityEvaluator(blockers: []),
             actionExecutor: executor
         )
 
@@ -55,7 +53,86 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
         XCTAssertEqual(releaseLoader.loadCount, 1)
         XCTAssertEqual(executor.executed.count, 1)
         XCTAssertEqual(executor.executed.first?.release.version, "1.1.7")
+        XCTAssertTrue(executor.installed.isEmpty)
         XCTAssertEqual(coordinator.pendingAvailability?.release.version, "1.1.7")
+        guard case .readyToRestart = coordinator.state else {
+            return XCTFail("Expected readyToRestart state")
+        }
+    }
+
+    func testAutomaticUpdatePromptsForDownloadThenSeparatelyForRestart() async {
+        let executor = MockUpdateExecutor()
+        let prompter = MockUpdatePrompter(downloadResponses: [true], restartResponses: [false, true])
+        let coordinator = UpdateCoordinator(
+            releaseLoader: MockReleaseLoader(release: self.makeAutomaticRelease(version: "1.1.7")),
+            environment: MockUpdateEnvironment(
+                currentVersion: "1.1.5",
+                architecture: .arm64
+            ),
+            capabilityEvaluator: MockCapabilityEvaluator(blockers: []),
+            actionExecutor: executor,
+            updatePrompter: prompter
+        )
+
+        await coordinator.checkForUpdates(trigger: .automaticStartup)
+
+        XCTAssertEqual(prompter.downloadedVersions, ["1.1.7"])
+        XCTAssertEqual(prompter.restartVersions, ["1.1.7"])
+        XCTAssertEqual(executor.executed.map(\.release.version), ["1.1.7"])
+        XCTAssertTrue(executor.installed.isEmpty)
+        guard case .readyToRestart = coordinator.state else {
+            return XCTFail("Expected readyToRestart state")
+        }
+
+        await coordinator.handleToolbarAction()
+
+        XCTAssertEqual(prompter.restartVersions, ["1.1.7", "1.1.7"])
+        XCTAssertEqual(executor.executed.count, 1)
+        XCTAssertEqual(executor.installed.map(\.release.version), ["1.1.7"])
+    }
+
+    func testAutomaticUpdateOfferIsShownOnlyOncePerVersionAfterDeferral() async {
+        let executor = MockUpdateExecutor()
+        let prompter = MockUpdatePrompter(downloadResponses: [false, true], restartResponses: [])
+        let coordinator = UpdateCoordinator(
+            releaseLoader: MockReleaseLoader(release: self.makeAutomaticRelease(version: "1.1.7")),
+            environment: MockUpdateEnvironment(
+                currentVersion: "1.1.5",
+                architecture: .arm64
+            ),
+            capabilityEvaluator: MockCapabilityEvaluator(blockers: []),
+            actionExecutor: executor,
+            updatePrompter: prompter
+        )
+
+        await coordinator.checkForUpdates(trigger: .automaticStartup)
+        await coordinator.checkForUpdates(trigger: .automaticDaily)
+
+        XCTAssertEqual(prompter.downloadedVersions, ["1.1.7"])
+        XCTAssertTrue(executor.executed.isEmpty)
+        XCTAssertTrue(executor.installed.isEmpty)
+    }
+
+    func testBlockedUpdateStopsBeforeActionExecution() async {
+        let executor = MockUpdateExecutor()
+        let coordinator = UpdateCoordinator(
+            releaseLoader: MockReleaseLoader(release: self.makeRelease(version: "1.1.7")),
+            environment: MockUpdateEnvironment(
+                currentVersion: "1.1.5",
+                architecture: .arm64
+            ),
+            capabilityEvaluator: MockCapabilityEvaluator(blockers: [.guidedDownloadOnlyRelease]),
+            actionExecutor: executor
+        )
+
+        await coordinator.checkForUpdates(trigger: .manual)
+        await coordinator.handleToolbarAction()
+
+        XCTAssertTrue(executor.executed.isEmpty)
+        XCTAssertTrue(executor.installed.isEmpty)
+        guard case .failed = coordinator.state else {
+            return XCTFail("Expected failed state")
+        }
     }
 
     func testAutomaticAndManualChecksUseSameReleaseResolution() async {
@@ -95,6 +172,7 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
                 blockers: [.guidedDownloadOnlyRelease]
             ),
             actionExecutor: MockUpdateExecutor(),
+            updatePrompter: NoninteractiveAppUpdatePrompter(),
             automaticCheckScheduler: scheduler,
             automaticCheckInterval: 123
         )
@@ -113,6 +191,23 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
 
         XCTAssertEqual(releaseLoader.loadCount, 2)
         XCTAssertEqual(coordinator.pendingAvailability?.release.version, "1.1.7")
+    }
+
+    func testStopDiscardsPreparedUpdateArtifacts() {
+        let executor = MockUpdateExecutor()
+        let coordinator = UpdateCoordinator(
+            releaseLoader: MockReleaseLoader(release: self.makeAutomaticRelease(version: "1.1.7")),
+            environment: MockUpdateEnvironment(
+                currentVersion: "1.1.5",
+                architecture: .arm64
+            ),
+            capabilityEvaluator: MockCapabilityEvaluator(blockers: []),
+            actionExecutor: executor
+        )
+
+        coordinator.stop()
+
+        XCTAssertEqual(executor.discardCount, 1)
     }
 
     func testManualCheckShowsUpToDateStateWhenVersionsMatch() async {
@@ -630,6 +725,26 @@ final class UpdateCoordinatorTests: CodexBarTestCase {
     ) -> AppUpdateRelease {
         self.makeFeed(version: version, artifacts: artifacts).release
     }
+
+    private func makeAutomaticRelease(version: String) -> AppUpdateRelease {
+        AppUpdateRelease(
+            version: version,
+            publishedAt: nil,
+            summary: "Automatic release",
+            releaseNotesURL: URL(string: "https://example.com/release-notes")!,
+            downloadPageURL: URL(string: "https://example.com/download")!,
+            deliveryMode: .automatic,
+            minimumAutomaticUpdateVersion: nil,
+            artifacts: [
+                AppUpdateArtifact(
+                    architecture: .universal,
+                    format: .dmg,
+                    downloadURL: URL(string: "https://example.com/universal.dmg")!,
+                    sha256: String(repeating: "a", count: 64)
+                ),
+            ]
+        )
+    }
 }
 
 private final class MockReleaseLoader: AppUpdateReleaseLoading {
@@ -666,13 +781,49 @@ private struct MockCapabilityEvaluator: AppUpdateCapabilityEvaluating {
 
 private final class MockUpdateExecutor: AppUpdateActionExecuting {
     var executed: [AppUpdateAvailability] = []
+    var installed: [AppUpdateAvailability] = []
+    var discardCount = 0
     var error: Error?
 
-    func execute(_ availability: AppUpdateAvailability) async throws {
+    func prepare(_ availability: AppUpdateAvailability) async throws {
         if let error {
             throw error
         }
         self.executed.append(availability)
+    }
+
+    func installAndRelaunch(_ availability: AppUpdateAvailability) async throws {
+        if let error {
+            throw error
+        }
+        self.installed.append(availability)
+    }
+
+    func discardPreparedUpdate() {
+        self.discardCount += 1
+    }
+}
+
+@MainActor
+private final class MockUpdatePrompter: AppUpdatePrompting {
+    var downloadResponses: [Bool]
+    var restartResponses: [Bool]
+    var downloadedVersions: [String] = []
+    var restartVersions: [String] = []
+
+    init(downloadResponses: [Bool], restartResponses: [Bool]) {
+        self.downloadResponses = downloadResponses
+        self.restartResponses = restartResponses
+    }
+
+    func confirmDownload(_ availability: AppUpdateAvailability) -> Bool {
+        self.downloadedVersions.append(availability.release.version)
+        return self.downloadResponses.isEmpty ? false : self.downloadResponses.removeFirst()
+    }
+
+    func confirmRestart(_ availability: AppUpdateAvailability) -> Bool {
+        self.restartVersions.append(availability.release.version)
+        return self.restartResponses.isEmpty ? false : self.restartResponses.removeFirst()
     }
 }
 

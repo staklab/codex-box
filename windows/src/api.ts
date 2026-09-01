@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Account, Dashboard, DesktopStatus, GatewayStatus, Profile, Provider, RecordsSnapshot, StartedFlow, ThemeListing, ThemePage, ThreadPreset, UpdateInfo } from "./types";
+import type { Account, Dashboard, DesktopStatus, GatewayStatus, PreparedUpdate, Profile, Provider, RecordsSnapshot, StartedFlow, ThemeListing, ThemePage, ThreadPreset, UpdateInfo } from "./types";
 
 export const api = {
   dashboard: () => invoke<Dashboard>("get_dashboard"),
@@ -17,6 +17,8 @@ export const api = {
   stopGateway: () => invoke<void>("stop_gateway"),
   setStartAtLogin: (enabled: boolean) => invoke<void>("set_start_at_login", { enabled }),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  downloadUpdate: () => invoke<PreparedUpdate>("download_update"),
+  installUpdate: () => invoke<void>("install_update"),
   createProvider: (input: { label: string; kind: string; baseUrl: string; model: string; accountLabel: string; apiKey: string }) => invoke<Provider>("create_provider", input),
   removeProvider: (providerId: string) => invoke<void>("remove_provider", { providerId }),
   setActiveProvider: (providerId: string | null) => invoke<void>("set_active_provider", { providerId }),

@@ -20,6 +20,11 @@ final class CoalescedBackgroundRefreshController<Result> {
         self.queue = queue
     }
 
+    // Swift 6.3.3 的 EarlyPerfInliner 会在优化此泛型类型的合成析构函数时崩溃。
+    // 显式保留一个无优化的空析构函数，避免影响其余 Release 代码的优化级别。
+    @_optimize(none)
+    deinit {}
+
     func requestRefresh(
         now: Date = Date(),
         load: @escaping Loader,

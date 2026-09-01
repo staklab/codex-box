@@ -32,4 +32,6 @@ export interface ModelRecord { modelId: string; sessionCount: number; lastSeenAt
 export interface RecordsSnapshot { sessions: SessionRecord[]; models: ModelRecord[]; warnings: string[] }
 export interface Dashboard { accounts: Account[]; profiles: Profile[]; cost: CostSummary; gateway: GatewayStatus | null; startAtLogin: boolean; providers: Provider[]; activeProviderId: string | null; themeState: ThemeState; themeSources: ThemeSource[]; autoRouteEnabled: boolean; autoRouteThreshold: number }
 export interface StartedFlow { flowId: string; authUrl: string }
-export interface UpdateInfo { version: string; downloadUrl: string; releaseUrl: string }
+export interface UpdateInfo { version: string; size: number }
+export interface PreparedUpdate { version: string }
+export interface UpdateDownloadProgress { downloaded: number; total: number }
