@@ -748,6 +748,8 @@ private enum OpenAIAccountGatewayResponsesRoute: Equatable {
 final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
     static let shared = OpenAIAccountGatewayService()
     nonisolated static let mockRequestBodyPropertyKey = "codexbar.mockRequestBody"
+    private static let stickyExpirationInterval: TimeInterval = 60 * 60 * 6
+    private static let maximumStickyBindingCount = 256
 
     private let listenerQueue = DispatchQueue(label: "lzl.codexbar.openai-gateway.listener")
     private let stateQueue = DispatchQueue(label: "lzl.codexbar.openai-gateway.state")
@@ -784,6 +786,42 @@ final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
         self.runtimeConfiguration = runtimeConfiguration
         self.routeJournalStore = routeJournalStore
         self.diagnosticsReporter = diagnosticsReporter
+
+        let restoredState = Self.restoredStickyState(
+            from: routeJournalStore.routeHistory(),
+            now: Date()
+        )
+        self.stickyBindings = restoredState.bindings
+        self.lastRoutedAccountID = restoredState.latestAccountID
+    }
+
+    private static func restoredStickyState(
+        from history: [OpenAIAggregateRouteRecord],
+        now: Date
+    ) -> (bindings: [String: StickyBinding], latestAccountID: String?) {
+        let cutoff = now.addingTimeInterval(-Self.stickyExpirationInterval)
+        var latestByThread: [String: OpenAIAggregateRouteRecord] = [:]
+        for record in history where record.timestamp >= cutoff {
+            if let existing = latestByThread[record.threadID],
+               existing.timestamp > record.timestamp {
+                continue
+            }
+            latestByThread[record.threadID] = record
+        }
+
+        let retained = latestByThread.values
+            .sorted { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp {
+                    return lhs.timestamp > rhs.timestamp
+                }
+                return lhs.threadID < rhs.threadID
+            }
+            .prefix(Self.maximumStickyBindingCount)
+
+        let bindings = Dictionary(uniqueKeysWithValues: retained.map {
+            ($0.threadID, StickyBinding(accountID: $0.accountID, updatedAt: $0.timestamp))
+        })
+        return (bindings, retained.first?.accountID)
     }
 
     private static func makeDedicatedUpstreamSession(
@@ -897,9 +935,13 @@ final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
 
     @discardableResult
     func clearStickyBinding(threadID: String) -> Bool {
-        self.stateQueue.sync {
+        let removed = self.stateQueue.sync {
             self.stickyBindings.removeValue(forKey: threadID) != nil
         }
+        if removed {
+            self.routeJournalStore.removeRoute(threadID: threadID)
+        }
+        return removed
     }
 
     private func receiveRequest(on connection: NWConnection, accumulated: Data) {
@@ -1109,10 +1151,12 @@ final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
 
     private func candidates(for snapshot: OpenAIAccountGatewaySnapshot, stickyKey: String?) -> [TokenAccount] {
         let now = Date()
-        let usable = snapshot.accounts.filter {
-            $0.isAvailableForNextUseRouting &&
+        let credentialUsable = snapshot.accounts.filter {
+            $0.isBanned == false &&
+            $0.tokenExpired == false &&
             (snapshot.runtimeBlockedUntilByAccountID[$0.accountId]?.timeIntervalSince(now) ?? 0) <= 0
         }
+        let usable = credentialUsable.filter { $0.quotaExhausted == false }
         guard snapshot.accountUsageMode == .aggregateGateway else {
             return usable.filter(\.isActive)
         }
@@ -1126,8 +1170,8 @@ final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
 
         if let stickyKey,
            let stickyAccountID = snapshot.stickyBindings[stickyKey]?.accountID,
-           let index = ordered.firstIndex(where: { $0.accountId == stickyAccountID }) {
-            let stickyAccount = ordered.remove(at: index)
+           let stickyAccount = credentialUsable.first(where: { $0.accountId == stickyAccountID }) {
+            ordered.removeAll { $0.accountId == stickyAccountID }
             ordered.insert(stickyAccount, at: 0)
         }
 
@@ -1171,18 +1215,21 @@ final class OpenAIAccountGatewayService: OpenAIAccountGatewayControlling {
 
     private func clearBinding(stickyKey: String?, accountID: String) {
         guard let stickyKey, stickyKey.isEmpty == false else { return }
-        self.stateQueue.sync {
-            guard self.stickyBindings[stickyKey]?.accountID == accountID else { return }
+        let removed = self.stateQueue.sync {
+            guard self.stickyBindings[stickyKey]?.accountID == accountID else { return false }
             self.stickyBindings.removeValue(forKey: stickyKey)
+            return true
+        }
+        if removed {
+            self.routeJournalStore.removeRoute(threadID: stickyKey)
         }
     }
 
     private func pruneStickyBindingsLocked() {
-        let expirationInterval: TimeInterval = 60 * 60 * 6
-        let cutoff = Date().addingTimeInterval(-expirationInterval)
+        let cutoff = Date().addingTimeInterval(-Self.stickyExpirationInterval)
         self.stickyBindings = self.stickyBindings.filter { $0.value.updatedAt >= cutoff }
 
-        let maxEntries = 256
+        let maxEntries = Self.maximumStickyBindingCount
         guard self.stickyBindings.count > maxEntries else { return }
         let sortedKeys = self.stickyBindings
             .sorted { $0.value.updatedAt < $1.value.updatedAt }

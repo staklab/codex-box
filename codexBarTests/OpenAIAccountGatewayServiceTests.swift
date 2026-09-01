@@ -313,7 +313,7 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         XCTAssertEqual(routeHistory.first?.accountID, "acct-alpha")
     }
 
-    func testStickyBindingsSnapshotAndClearOnlyAffectInMemoryBinding() async throws {
+    func testStickyBindingClearRemovesPersistedRoute() async throws {
         let routeJournalStore = OpenAIAggregateRouteJournalStore(
             fileURL: CodexPaths.openAIGatewayRouteJournalURL
         )
@@ -354,7 +354,96 @@ final class OpenAIAccountGatewayServiceTests: CodexBarTestCase {
         XCTAssertEqual(service.stickyBindingsSnapshot().map(\.threadID), ["thread-sticky-clear"])
         XCTAssertTrue(service.clearStickyBinding(threadID: "thread-sticky-clear"))
         XCTAssertTrue(service.stickyBindingsSnapshot().isEmpty)
-        XCTAssertEqual(routeJournalStore.routeHistory().map(\.threadID), ["thread-sticky-clear"])
+        XCTAssertTrue(routeJournalStore.routeHistory().isEmpty)
+    }
+
+    func testRestoredStickyThreadTriesOriginalAccountUntilConfirmedUnavailable() async throws {
+        let routeJournalStore = OpenAIAggregateRouteJournalStore(
+            fileURL: CodexPaths.openAIGatewayRouteJournalURL
+        )
+        routeJournalStore.recordRoute(
+            threadID: "thread-restored",
+            accountID: "acct-alpha",
+            timestamp: Date()
+        )
+
+        let service = self.makeService(routeJournalStore: routeJournalStore)
+        let exhaustedOriginal = self.makeGatewayAccount(
+            email: "alpha@example.com",
+            accountId: "acct-alpha",
+            openAIAccountId: "openai-alpha",
+            accessToken: "token-alpha",
+            refreshToken: "refresh-alpha",
+            idToken: "id-alpha",
+            planType: "plus",
+            primaryUsedPercent: 100,
+            secondaryUsedPercent: 100
+        )
+        let healthyAlternate = self.makeGatewayAccount(
+            email: "beta@example.com",
+            accountId: "acct-beta",
+            openAIAccountId: "openai-beta",
+            accessToken: "token-beta",
+            refreshToken: "refresh-beta",
+            idToken: "id-beta",
+            planType: "free",
+            primaryUsedPercent: 10,
+            secondaryUsedPercent: 10
+        )
+        service.updateState(
+            accounts: [exhaustedOriginal, healthyAlternate],
+            quotaSortSettings: .init(),
+            accountUsageMode: .aggregateGateway
+        )
+
+        let observedQueue = DispatchQueue(label: "OpenAIAccountGatewayServiceTests.restoredStickyObserved")
+        var attemptedAccountIDs: [String] = []
+        MockURLProtocol.handler = { request in
+            let accountID = request.value(forHTTPHeaderField: "chatgpt-account-id") ?? ""
+            observedQueue.sync { attemptedAccountIDs.append(accountID) }
+            let statusCode = accountID == "openai-alpha" ? 429 : 200
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            let body = statusCode == 200 ? "data: ok\n\n" : "usage limit"
+            return (response, Data(body.utf8))
+        }
+
+        let response = try await self.postToGateway(
+            service: service,
+            stickyKey: "thread-restored",
+            body: """
+            {"model":"gpt-5.5","input":[{"role":"user","content":[{"type":"input_text","text":"continue"}]}],"previous_response_id":"resp-existing"}
+            """
+        )
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(observedQueue.sync { attemptedAccountIDs }, ["openai-alpha", "openai-beta"])
+        XCTAssertEqual(service.currentRoutedAccountIDForTesting(), "acct-beta")
+        XCTAssertEqual(routeJournalStore.routeHistory().map(\.accountID), ["acct-beta"])
+
+        let restartedService = self.makeService(routeJournalStore: routeJournalStore)
+        restartedService.updateState(
+            accounts: [exhaustedOriginal, healthyAlternate],
+            quotaSortSettings: .init(),
+            accountUsageMode: .aggregateGateway
+        )
+        XCTAssertEqual(restartedService.stickyBindingsSnapshot().map(\.accountID), ["acct-beta"])
+        XCTAssertEqual(restartedService.currentRoutedAccountIDForTesting(), "acct-beta")
+
+        observedQueue.sync { attemptedAccountIDs.removeAll() }
+        let newThreadResponse = try await self.postToGateway(
+            service: restartedService,
+            stickyKey: "thread-new",
+            body: """
+            {"model":"gpt-5.5","input":[{"role":"user","content":[{"type":"input_text","text":"new thread"}]}]}
+            """
+        )
+        XCTAssertEqual(newThreadResponse.statusCode, 200)
+        XCTAssertEqual(observedQueue.sync { attemptedAccountIDs }, ["openai-beta"])
     }
 
     func testResponsesProbeGETBuildsWebSocketHandshakeWhenHeadersAndAccountExist() async throws {

@@ -21,7 +21,12 @@ struct OpenAIAggregateRouteRecord: Codable, Equatable {
 
 protocol OpenAIAggregateRouteJournalStoring {
     func recordRoute(threadID: String, accountID: String, timestamp: Date)
+    func removeRoute(threadID: String)
     func routeHistory() -> [OpenAIAggregateRouteRecord]
+}
+
+extension OpenAIAggregateRouteJournalStoring {
+    func removeRoute(threadID _: String) {}
 }
 
 private struct OpenAIAggregateGatewayLeaseSnapshot: Codable, Equatable {
@@ -131,6 +136,19 @@ final class OpenAIAggregateRouteJournalStore: OpenAIAggregateRouteJournalStoring
                 }
                 return lhs.accountID < rhs.accountID
             }
+        }
+    }
+
+    func removeRoute(threadID: String) {
+        guard threadID.isEmpty == false else { return }
+
+        self.queue.sync {
+            var snapshot = self.loadSnapshot()
+            let previousCount = snapshot.routes.count
+            snapshot.routes.removeAll { $0.threadID == threadID }
+            guard snapshot.routes.count != previousCount else { return }
+            snapshot.updatedAt = Date()
+            self.saveSnapshot(snapshot)
         }
     }
 
