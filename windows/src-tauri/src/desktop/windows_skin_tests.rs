@@ -96,7 +96,11 @@ async fn official_windows_skin_startup() {
     std::fs::create_dir_all(&artifacts).unwrap();
     assert!(is_supported_executable(&desktop));
     let _guard=DesktopGuard(desktop.clone());
-    let state=ThemeState{codex_executable:Some(desktop.to_string_lossy().into()),..Default::default()};
+    assert!(!is_supported_executable(&desktop.parent().unwrap().join("resources/codex.exe")), "官方后台 CLI 不能被识别成桌面");
+    let ordinary = ChildGuard(Command::new(&desktop).spawn().unwrap());
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let state=ThemeState{codex_executable:Some(desktop.to_string_lossy().into()),debug_port:Some(9),..Default::default()};
+    assert!(ensure_debug_port(&state,false).await.is_err(), "普通启动需要重连确认");
     let (port,_)=match ensure_debug_port(&state,true).await {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -113,6 +117,9 @@ async fn official_windows_skin_startup() {
         }
     };
     let target=healthy_main_target(port).await.unwrap();
+    drop(ordinary);
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    healthy_main_target(port).await.unwrap();
     let screenshot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
     std::fs::write(artifacts.join("official-before.png"),STANDARD.decode(screenshot["data"].as_str().unwrap()).unwrap()).unwrap();
     let theme_id=format!("official-e2e-{}",uuid::Uuid::new_v4());
@@ -131,5 +138,5 @@ async fn official_windows_skin_startup() {
     remove_skin(port).await.unwrap();
     healthy_main_target(port).await.unwrap();
     std::fs::remove_dir_all(dir).unwrap();
-    std::fs::write(artifacts.join("official-result.json"),json!({"passed":true,"version":std::env::var("CODEX_BOX_E2E_OFFICIAL_VERSION").unwrap(),"startup":true,"injection":true,"restore":true,"authenticatedSession":false}).to_string()).unwrap();
+    std::fs::write(artifacts.join("official-result.json"),json!({"passed":true,"version":std::env::var("CODEX_BOX_E2E_OFFICIAL_VERSION").unwrap(),"startup":true,"ordinaryRestart":true,"cliRejected":true,"injection":true,"restore":true,"authenticatedSession":false}).to_string()).unwrap();
 }

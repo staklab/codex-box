@@ -52,7 +52,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 pnpm tauri build --bundles nsis,msi
 ```
 
-Windows CI 还会启动独立 Electron 桌面与同名 CLI，验证普通启动后的重连、进程隔离、主窗口选择、深浅模式壁纸注入、真实鼠标点击和恢复默认，并保存截图。该测试使用独立应用夹具，不需要账号，不等同于官方客户端完整兼容性验收。
+Windows CI 还会启动独立 Electron 桌面与同名 CLI，验证普通启动后的重连、进程隔离、主窗口选择、深浅模式壁纸注入、真实鼠标点击和恢复默认，并保存截图。另外安装签名有效的官方 Codex MSIX（26.825.6671.0），在空白登录环境验证普通启动后的换肤重连、壁纸注入与恢复。测试不使用账号，不覆盖已登录会话内的全部功能。
 
 安装包输出到 `src-tauri/target/release/bundle/`。完整 Windows 构建也可通过仓库的“Windows 构建与测试”工作流执行。
 
