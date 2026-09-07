@@ -446,15 +446,23 @@ pub fn load_definition(id: &str) -> anyhow::Result<(ThemeColors, PathBuf)> {
 
 pub fn revert_native_colors() -> anyhow::Result<()> {
     let path = paths::codex_config_path()?;
-    let mut updated = std::fs::read_to_string(&path).unwrap_or_default();
+    let original = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut updated = original.clone();
     for table in [
         "desktop.appearanceLightChromeTheme.semanticColors",
         "desktop.appearanceDarkChromeTheme.semanticColors",
         "desktop.appearanceLightChromeTheme",
         "desktop.appearanceDarkChromeTheme",
     ] {
-        updated = config_edit::remove_table(&updated, table);
+        if updated.lines().any(|line| line.trim() == format!("[{table}]")) {
+            updated = config_edit::remove_table(&updated, table);
+        }
     }
+    if updated == original { return Ok(()) }
     config_edit::write_with_backup(&path, &updated, "config.toml.bak-codexbox-theme")
 }
 

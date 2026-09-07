@@ -16,7 +16,6 @@ use tokio_tungstenite::tungstenite::Message;
 struct CdpTarget {
     #[serde(rename = "type")]
     kind: String,
-    title: Option<String>,
     url: Option<String>,
     web_socket_debugger_url: Option<String>,
 }
@@ -80,11 +79,14 @@ fn candidate_paths(
 }
 
 fn is_supported_executable(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe")
-        })
+    let supported_name = path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+        name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe")
+    });
+    let Some(parent) = path.parent() else { return false };
+    // Windows 文件名不区分大小写；后台 CLI codex.exe 不能作为 Electron 桌面启动。
+    supported_name && path.is_file() && parent.join("icudtl.dat").is_file()
+        && (parent.join("resources/app.asar").is_file()
+            || parent.join("resources/app/package.json").is_file())
 }
 
 #[cfg(target_os = "windows")]
@@ -107,7 +109,7 @@ fn powershell_lines(script: &str) -> Vec<String> {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            script,
+            &format!("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); {script}"),
         ],
     )
     .map(|output| {
@@ -123,7 +125,7 @@ fn powershell_lines(script: &str) -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 fn find_running_desktop_executable() -> Option<PathBuf> {
-    powershell_lines("Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') -and $_.ExecutablePath } | Select-Object -ExpandProperty ExecutablePath -First 1")
+    powershell_lines("Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') -and $_.ExecutablePath } | Select-Object -ExpandProperty ExecutablePath -Unique")
         .into_iter()
         .map(PathBuf::from)
         .find(|path| path.is_file() && is_supported_executable(path))
@@ -155,7 +157,7 @@ fn find_executables_on_path() -> Vec<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn find_packaged_desktop_executable() -> Option<PathBuf> {
-    powershell_lines("Get-AppxPackage | Where-Object { $_.Name -match 'ChatGPT|Codex|OpenAI' } | ForEach-Object { Get-ChildItem -LiteralPath $_.InstallLocation -Filter '*.exe' -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') } | Select-Object -ExpandProperty FullName } | Select-Object -First 1")
+    powershell_lines("Get-AppxPackage | Where-Object { $_.Name -match 'ChatGPT|Codex|OpenAI' } | ForEach-Object { Get-ChildItem -LiteralPath $_.InstallLocation -Filter '*.exe' -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') } | Select-Object -ExpandProperty FullName }")
         .into_iter()
         .map(PathBuf::from)
         .find(|path| path.is_file() && is_supported_executable(path))
@@ -175,7 +177,7 @@ pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Res
             return Ok((port, executable));
         }
     }
-    if let Some(port) = find_running_debug_port() {
+    for port in find_running_debug_ports() {
         if healthy_main_target(port).await.is_ok() {
             let executable = find_codex_executable(state.codex_executable.as_deref())
                 .map(|path| path.to_string_lossy().into_owned())
@@ -198,6 +200,7 @@ pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Res
     let mut command = Command::new(&executable);
     command
         .arg(format!("--remote-debugging-port={port}"))
+        .arg("--remote-debugging-address=127.0.0.1")
         .arg(format!("--remote-allow-origins=http://127.0.0.1:{port}"))
         .env(
             "NO_PROXY",
@@ -226,31 +229,24 @@ pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Res
 }
 
 #[cfg(target_os = "windows")]
+fn desktop_process_query(executable: &Path) -> String {
+    let quoted = executable.to_string_lossy().replace('\'', "''");
+    format!("Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -eq '{quoted}' }}")
+}
+
+#[cfg(target_os = "windows")]
 fn stop_exact_codex_process(executable: &Path) -> anyhow::Result<()> {
-    let name = executable
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Codex 程序路径无效"))?;
     if !is_supported_executable(executable) {
-        anyhow::bail!("仅允许重启 Codex Desktop")
+        anyhow::bail!("仅允许重启已验证的 Codex Desktop，不能重启同名 CLI")
     }
-    let _ = Command::new("taskkill").args(["/IM", name, "/T"]).output();
-    for _ in 0..20 {
-        if !desktop_process_is_running(executable) {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(200));
+    // 只请求此安装路径的窗口正常退出，避免 /IM Codex.exe 误杀其他会话的后台服务。
+    let script = format!("{} | ForEach-Object {{ $p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; if ($p) {{ $null = $p.CloseMainWindow() }} }}", desktop_process_query(executable));
+    powershell_lines(&script);
+    for _ in 0..40 {
+        if !desktop_process_is_running(executable) { return Ok(()) }
+        std::thread::sleep(Duration::from_millis(250));
     }
-    let _ = Command::new("taskkill")
-        .args(["/IM", name, "/T", "/F"])
-        .output();
-    for _ in 0..20 {
-        if !desktop_process_is_running(executable) {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    anyhow::bail!("Codex Desktop 未能完全退出，请手动关闭后重试")
+    anyhow::bail!("Codex Desktop 尚未正常退出，请保存任务并手动关闭后重试")
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -260,18 +256,7 @@ fn stop_exact_codex_process(_executable: &Path) -> anyhow::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn desktop_process_is_running(executable: &Path) -> bool {
-    let Some(name) = executable.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    hidden_output(
-        "tasklist.exe",
-        &["/FI", &format!("IMAGENAME eq {name}"), "/NH"],
-    )
-    .is_some_and(|output| {
-        String::from_utf8_lossy(&output.stdout)
-            .to_lowercase()
-            .contains(&name.to_lowercase())
-    })
+    !powershell_lines(&format!("{} | Select-Object -ExpandProperty ProcessId", desktop_process_query(executable))).is_empty()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -280,16 +265,13 @@ fn desktop_process_is_running(_executable: &Path) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn find_running_debug_port() -> Option<u16> {
+fn find_running_debug_ports() -> Vec<u16> {
     powershell_lines("Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('Codex.exe','ChatGPT.exe') -and $_.CommandLine } | Select-Object -ExpandProperty CommandLine")
-        .iter()
-        .find_map(|line| parse_debug_port(line))
+        .iter().filter_map(|line| parse_debug_port(line)).collect()
 }
 
 #[cfg(not(target_os = "windows"))]
-fn find_running_debug_port() -> Option<u16> {
-    None
-}
+fn find_running_debug_ports() -> Vec<u16> { Vec::new() }
 
 #[cfg(any(target_os = "windows", test))]
 fn parse_debug_port(command_line: &str) -> Option<u16> {
@@ -343,24 +325,22 @@ async fn page_targets(port: u16) -> anyhow::Result<Vec<CdpTarget>> {
 }
 
 async fn main_target(port: u16) -> anyhow::Result<CdpTarget> {
-    let targets = page_targets(port).await?;
-    targets
-        .iter()
-        .find(|target| {
-            let title = target.title.as_deref().unwrap_or_default().to_lowercase();
-            let url = target.url.as_deref().unwrap_or_default();
-            title.contains("codex") || url.contains("index.html")
+    select_main_target(page_targets(port).await?)
+}
+
+fn select_main_target(targets: Vec<CdpTarget>) -> anyhow::Result<CdpTarget> {
+    targets.into_iter().find(|target| {
+        target.url.as_deref().and_then(|url| url::Url::parse(url).ok()).is_some_and(|url| {
+            url.scheme() == "app" && url.host_str() == Some("-") && url.path() == "/index.html"
         })
-        .cloned()
-        .or_else(|| targets.into_iter().next())
-        .ok_or_else(|| anyhow::anyhow!("找不到 Codex 桌面主窗口"))
+    }).ok_or_else(|| anyhow::anyhow!("找不到 Codex 桌面主窗口，辅助窗口不能用于换肤"))
 }
 
 async fn healthy_main_target(port: u16) -> anyhow::Result<CdpTarget> {
     let target = main_target(port).await?;
     let health = evaluate_target(
         &target,
-        "(() => { const text=(document.body?.innerText||'').toLowerCase(); if(text.includes('hit a snag')||text.includes('something went wrong')) return 'error-page'; return (window.electronBridge||window.__codexRoot)?'ready':'loading'; })()",
+        "(() => { if(document.readyState==='loading'||!document.body) return 'loading'; const shell=document.querySelector('.app-shell-left-panel,main,[data-app-shell-main-surface]'); const text=(document.body.innerText||'').toLowerCase(); if(!shell && (text.includes('hit a snag')||text.includes('something went wrong')||text.includes('遇到问题'))) return 'error-page'; return (window.electronBridge||window.__codexRoot) && document.body.children.length ? 'ready':'loading'; })()",
         false,
     )
     .await?;
@@ -376,6 +356,11 @@ async fn evaluate_target(
     expression: &str,
     await_promise: bool,
 ) -> anyhow::Result<Value> {
+    tokio::time::timeout(Duration::from_secs(20), evaluate_target_inner(target, expression, await_promise))
+        .await.map_err(|_| anyhow::anyhow!("Codex 调试连接超时"))?
+}
+
+async fn evaluate_target_inner(target: &CdpTarget, expression: &str, await_promise: bool) -> anyhow::Result<Value> {
     let url = target
         .web_socket_debugger_url
         .as_deref()
@@ -423,11 +408,13 @@ pub async fn inject_theme(id: &str, port: u16) -> anyhow::Result<()> {
     let css = build_css(&colors, &directory)?;
     let encoded = STANDARD.encode(css.as_bytes());
     let script = format!(
-        "(() => {{ const css=atob('{}'); let el=document.getElementById('codexbox-skin'); if(!el){{el=document.createElement('style');el.id='codexbox-skin';document.documentElement.appendChild(el);}} el.textContent=css; return 'ok'; }})()",
+        "(() => {{ const css=new TextDecoder().decode(Uint8Array.from(atob('{}'),c=>c.charCodeAt(0))); let el=document.getElementById('codexbox-skin'); if(!el){{el=document.createElement('style');el.id='codexbox-skin';document.documentElement.appendChild(el);}} el.textContent=css; return el.isConnected && el.sheet && el.sheet.cssRules.length > 0 ? 'ok' : 'failed'; }})()",
         encoded
     );
     let target = healthy_main_target(port).await?;
-    evaluate_target(&target, &script, false).await?;
+    if evaluate_target(&target, &script, false).await?.as_str() != Some("ok") {
+        anyhow::bail!("主题样式未成功加载")
+    }
     Ok(())
 }
 
@@ -459,12 +446,17 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
 .electron-dark{{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60)}}
 .electron-light{{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70)}}
 :root,.electron-dark,.electron-light{{--wb-surface-primary:var(--codexbox-scrim)!important;--color-background-surface:var(--codexbox-scrim)!important;--wb-surface-secondary:var(--codexbox-scrim-2)!important;--color-background-surface-under:var(--codexbox-scrim-2)!important;{}}}
-aside.app-shell-left-panel,main.bg-surface,main[class*="_MainContentSurface_"],header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
+.app-shell-left-panel,main.bg-surface,main[class*="_MainContentSurface_"],header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
 [class*="_ComposerLayoutRoot_"],[class*="_ComposerLayoutBody_"]{{background:transparent!important}}
 .electron-light [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
 .electron-dark [class*="_ComposerLayoutRoot_"]{{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
 [class*="_ComposerLayoutRoot_"].gap-2{{border-radius:25px!important;overflow:hidden!important}}
 [class*="_MainContentTopFade_"]{{display:none!important;background:none!important}}
+.app-shell-left-panel::after{{content:none!important;background:transparent!important}}
+.electron-light .app-shell-left-panel,.electron-light main[class*="_MainContentSurface_"],.electron-light header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
+.electron-light{{--color-text-primary:#18232b!important;--color-text-secondary:#1c252e!important;--color-text-tertiary:#1c252e!important}}
+.electron-light .text-size-chat{{background:rgba(248,250,249,.56)!important;border-radius:12px;box-shadow:0 0 0 8px rgba(248,250,249,.56)}}
+.electron-light [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
 body::after{{content:none!important}}
 "#,
         accents.join("")
@@ -486,7 +478,7 @@ body::after{{content:none!important}}
             "image/jpeg"
         };
         css.push_str(&format!(
-            "html,body{{background:transparent!important}}body::before{{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background-image:url(\"data:{mime};base64,{}\");background-size:cover;background-position:center}}.electron-light body::before{{filter:contrast(.82) saturate(.9)}}.electron-dark body::before{{filter:brightness(.55) saturate(.9)}}",
+            "html,body{{background:transparent!important}}body::before{{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background-image:url(\"data:{mime};base64,{}\");background-size:cover;background-position:center}}.electron-light body::before{{filter:saturate(1.05)}}.electron-dark body::before{{filter:brightness(.55) saturate(.9)}}",
             STANDARD.encode(bytes)
         ));
         break;
@@ -499,7 +491,13 @@ pub async fn desktop_status(state: &ThemeState, fallback: ThreadPreset) -> Deskt
         .map(|path| path.to_string_lossy().into_owned());
     let port = match state.debug_port {
         Some(port) if healthy_main_target(port).await.is_ok() => Some(port),
-        _ => find_running_debug_port(),
+        _ => {
+            let mut live = None;
+            for candidate in find_running_debug_ports() {
+                if healthy_main_target(candidate).await.is_ok() { live = Some(candidate); break }
+            }
+            live
+        }
     };
     let Some(port) = port else {
         return DesktopStatus {
@@ -717,9 +715,17 @@ mod tests {
 
     #[test]
     fn supports_both_desktop_executable_names() {
-        assert!(is_supported_executable(Path::new("C:/Apps/Codex.exe")));
-        assert!(is_supported_executable(Path::new("C:/Apps/ChatGPT.exe")));
-        assert!(!is_supported_executable(Path::new("C:/Apps/codex-box.exe")));
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("resources")).unwrap();
+        for name in ["Codex.exe", "ChatGPT.exe", "codex-box.exe"] {
+            std::fs::write(root.path().join(name), b"exe").unwrap();
+        }
+        assert!(!is_supported_executable(&root.path().join("Codex.exe")), "同名 CLI 必须被排除");
+        std::fs::write(root.path().join("icudtl.dat"), b"icu").unwrap();
+        std::fs::write(root.path().join("resources/app.asar"), b"app").unwrap();
+        assert!(is_supported_executable(&root.path().join("Codex.exe")));
+        assert!(is_supported_executable(&root.path().join("ChatGPT.exe")));
+        assert!(!is_supported_executable(&root.path().join("codex-box.exe")));
     }
 
     #[test]
@@ -746,3 +752,7 @@ mod tests {
         assert!(paths.iter().any(|path| path.ends_with("ChatGPT.exe")));
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "desktop/windows_skin_tests.rs"]
+mod windows_skin_tests;

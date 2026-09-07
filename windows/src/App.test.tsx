@@ -43,7 +43,7 @@ test("keeps destructive confirmation inside the app before removing an account",
   fireEvent.click(screen.getByRole("button", { name: "移除" }));
   expect(screen.getByRole("dialog", { name: "移除这个账号？" })).toBeInTheDocument();
   expect(api.removeAccount).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  fireEvent.click(await screen.findByRole("button", { name: "确认" }));
   await waitFor(() => expect(api.removeAccount).toHaveBeenCalledWith("a1"));
 });
 
@@ -57,7 +57,7 @@ test("renders only one bounded page for a large theme market", async () => {
   expect(container.querySelectorAll(".theme-card")).toHaveLength(24);
   expect(screen.getByText("1 / 21")).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "安装并应用" }).find(button => !button.hasAttribute("disabled"))!);
-  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  fireEvent.click(await screen.findByRole("button", { name: "确认" }));
   await waitFor(() => expect(api.installAndApplyTheme).toHaveBeenCalledWith("theme-0", "测试源", true));
   fireEvent.click(screen.getByRole("button", { name: "账号" }));
   fireEvent.click(screen.getByRole("button", { name: "主题" }));
@@ -96,3 +96,17 @@ test("checks GitHub automatically after startup", async () => {
   render(<App />);
   await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(1), { timeout: 2500 });
 });
+
+for (const connected of [false, true]) {
+  test(`换肤检查真实连接而不是缓存端口：${connected}`, async () => {
+    vi.mocked(api.dashboard).mockResolvedValue({ ...dashboard, themeState: { ...dashboard.themeState,
+      debugPort: 54321, appliedThemeId: "skin", installed: [{id:"skin",name:"测试皮肤",version:"1",hasImage:true,installedAt:"",themeSha256:"",imageSha256:null}]
+    }});
+    vi.mocked(api.desktopStatus).mockResolvedValue({connected,target:"测试",conversationId:null,preset:{model:"test",reasoningEffort:"medium",serviceTier:"flex",contextWindow:272000},codexExecutable:null,debugPort:connected ? 54322 : null});
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", {name:"主题"}));
+    fireEvent.click(await screen.findByRole("button", {name:"重新应用"}));
+    if (!connected) fireEvent.click(await screen.findByRole("button", {name:"确认"}));
+    await waitFor(() => expect(api.applyTheme).toHaveBeenCalledWith("skin", !connected));
+  });
+}
