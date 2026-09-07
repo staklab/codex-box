@@ -589,6 +589,18 @@ final class CodexBarConfigStore {
             }
         }
 
+        // 读取桌面端新登录的账号，仅保存到 codex-box；保留用户的请求目标选择。
+        if onlyAccountIDs == nil,
+           self.matchingStoredAccountIndex(
+               in: config.oauthProvider()?.accounts ?? [], snapshot: snapshot, onlyAccountIDs: nil
+           ) == nil,
+           self.matchingStoredAccountIndex(
+               in: config.openAI.remoteConnectionAccounts, snapshot: snapshot, onlyAccountIDs: nil
+           ) == nil {
+            _ = config.upsertOAuthAccount(snapshot.account, activate: false)
+            changed = true
+        }
+
         if let remoteAccountIndex = self.matchingStoredAccountIndex(
             in: config.openAI.remoteConnectionAccounts,
             snapshot: snapshot,
@@ -605,6 +617,15 @@ final class CodexBarConfigStore {
         }
 
         return (config, changed)
+    }
+
+    func currentCodexAccountID(in config: CodexBarConfig) -> String? {
+        guard let snapshot = self.authJSONSnapshot(from: self.readAuthJSON()),
+              let accounts = config.oauthProvider()?.accounts,
+              let index = self.matchingStoredAccountIndex(
+                  in: accounts, snapshot: snapshot, onlyAccountIDs: nil
+              ) else { return nil }
+        return accounts[index].id
     }
 
     private func refreshOAuthAccountMetadata(

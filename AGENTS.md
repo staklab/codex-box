@@ -46,6 +46,7 @@ For OpenAI OAuth account import, use the menu bar app and its localhost callback
 
 ## 本地安装清理
 
+- macOS 功能修复通过验证后，默认构建并替换 `/Applications/codex-box.app`，启动确认，方便用户直接验收；除非用户明确要求只改源码。替换前保留可恢复副本，验证成功后清理临时备份和构建产物。
 - 只要本次任务涉及本地构建、安装、替换或发布 `codex-box.app`，结束前必须做安装清理，不要留下会在 App Library、Spotlight 或 Launch Services 中表现为“多个 codex-box”的残留。
 - 默认必须清理本次任务产生或显然属于构建/安装残留的 `codex-box.app` 副本与目录，例如仓库内 build/staging 目录、`DerivedData` 产物、`/private/tmp` 下的临时安装目录、临时挂载出的测试副本。
 - 默认必须核对最终可见性：`mdfind`、`lsregister` 或等价检查应只剩任务上下文指定的目标安装副本。

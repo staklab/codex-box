@@ -2,6 +2,15 @@ import Foundation
 import XCTest
 
 final class OpenAIUsagePollingServiceTests: XCTestCase {
+    func testPolicyReadsDesktopLoginWithoutRequiringARequestTarget() {
+        let account = TokenAccount(email: "desktop@example.com", accountId: "desktop", lastChecked: .distantPast)
+        let result = OpenAIUsagePollingPolicy.accountToRefresh(
+            activeProvider: nil, activeAccount: nil, desktopAccount: account,
+            now: Date(), maxAge: 60, force: false
+        )
+        XCTAssertEqual(result?.accountId, "desktop")
+    }
+
     func testPolicyRefreshesStaleActiveOAuthAccount() {
         let provider = CodexBarProvider(
             id: "openai-oauth",

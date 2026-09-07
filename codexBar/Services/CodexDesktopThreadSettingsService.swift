@@ -71,7 +71,7 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
         case .thread(let id):
             return "当前对话 · \(id.prefix(8))"
         case .unavailable:
-            return "未连接"
+            return "会话控制未连接"
         }
     }
 

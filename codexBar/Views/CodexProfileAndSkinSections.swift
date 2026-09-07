@@ -255,7 +255,7 @@ struct CodexSkinSectionView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if self.themeService.state.appliedThemeID != nil {
-                    Button("恢复默认配色") { self.revert() }
+                    Button("恢复默认皮肤") { Task { await self.revert() } }
                         .buttonStyle(.borderless)
                         .font(.caption2)
                 }
@@ -328,19 +328,22 @@ struct CodexSkinSectionView: View {
     /// **不驱动界面配色**——把 surface 写成 #ff0000 重启后界面仍是默认 #181818，
     /// 那张表只有 `opaqueWindows` 之类的窗口属性会生效。
     /// 真正决定界面的是 `--wb-*` / `--color-background-*` 这组 CSS 变量，
-    /// 只能通过 CDP 注入覆盖，所以应用主题必然要重启 Codex 并接入调试端口。
+    /// 通过 CDP 注入覆盖；已有调试连接时可直接应用主题。
     private func apply(_ id: String) {
-        let alert = NSAlert()
-        alert.messageText = "应用主题需要重启 Codex"
-        alert.informativeText = "Codex 将以调试端口重启，codex-box 通过它注入主题配色与壁纸。\n\n"
-            + "说明：Codex 的界面配色无法通过配置文件修改，只能注入——这是换肤的唯一可行方式。"
-            + "调试端口开启期间，本机上的任何进程都能控制该窗口；关闭 Codex 后端口即消失。"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "重启并应用")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        Task { await self.applyWithInjection(id) }
+        Task {
+            if await self.injectionService.hasLiveDebugTarget() {
+                await self.applyWithInjection(id)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "首次换肤需要重启 Codex"
+            alert.informativeText = "连接外观控制后，后续换肤可直接生效。请先等待 Codex 中正在运行的任务结束。\n\n调试端口开启期间，本机进程可控制该窗口；关闭 Codex 后端口即消失。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "重启并应用")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            await self.applyWithInjection(id)
+        }
     }
 
     private func applyWithInjection(_ id: String) async {
@@ -353,7 +356,7 @@ struct CodexSkinSectionView: View {
             _ = try await self.injectionService.launchCodexWithDebugging()
             try await self.injectionService.injectSkin(themeID: id, themeService: self.themeService)
             self.needsRestart = false
-            self.message = "已应用（Codex 已重启并注入）。"
+            self.message = "主题已应用。"
         } catch {
             self.message = error.localizedDescription
         }
@@ -383,10 +386,13 @@ struct CodexSkinSectionView: View {
         self.message = "Codex 已重启。"
     }
 
-    private func revert() {
+    private func revert() async {
+        self.isBusy = true
+        defer { self.isBusy = false }
         do {
             try self.themeService.revertNativeColors()
-            self.message = "已移除本工具写入的主题表。"
+            try await self.injectionService.removeSkin()
+            self.message = "已恢复默认皮肤。"
         } catch {
             self.message = error.localizedDescription
         }

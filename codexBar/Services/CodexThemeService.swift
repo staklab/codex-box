@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CryptoKit
 import Foundation
+import ImageIO
 
 // MARK: - 市场模型
 
@@ -865,8 +866,12 @@ final class CodexThemeService: ObservableObject {
         for case let url as URL in walker {
             let ext = url.pathExtension.lowercased()
             guard ["png", "jpg", "jpeg", "webp"].contains(ext) else { continue }
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            // 取最大的一张，缩略图/图标通常远小于壁纸
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int else { continue }
+            let size = width * height
+            // 压缩后的文件大小不能代表清晰度，按原始像素选择壁纸，不重新编码。
             if best == nil || size > best!.1 { best = (url, size) }
         }
         guard let picked = best else { throw CodexThemeError.downloadFailed("包内无图片") }

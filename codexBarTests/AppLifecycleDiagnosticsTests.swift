@@ -101,7 +101,7 @@ final class AppLifecycleDiagnosticsTests: XCTestCase {
         XCTAssertEqual(events, ["single_process_runtime_services_started"])
     }
 
-    func testHandleApplicationDidBecomeActiveReloadsStoreAndRefreshesOAuth() async {
+    func testHandleApplicationDidBecomeActiveReloadsDesktopLoginReadOnly() async {
         let store = TokenStoreSpy()
         let oauth = OAuthRefreshSpy()
         let controller = SingleProcessAppRuntimeController(
@@ -116,7 +116,7 @@ final class AppLifecycleDiagnosticsTests: XCTestCase {
         await controller.handleApplicationDidBecomeActive()
 
         XCTAssertEqual(store.loadCount, 1)
-        XCTAssertEqual(oauth.refreshDueAccountsCount, 1)
+        XCTAssertEqual(oauth.refreshDueAccountsCount, 0)
     }
 
     func testStopStopsRuntimeServicesAndRecordsEvent() {

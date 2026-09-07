@@ -689,6 +689,40 @@ final class CodexBarConfigStoreTests: CodexBarTestCase {
         XCTAssertEqual(reloadedAccount.tokenLastRefreshAt, tokenLastRefreshAt)
     }
 
+    func testReconcileImportsDesktopLoginWithoutChangingRequestTargetOrAuthFile() throws {
+        let store = CodexBarConfigStore()
+        let desktop = try self.makeOAuthAccount(accountID: "desktop-account", email: "desktop@example.com")
+        let selected = CodexBarActiveSelection(providerId: "custom", accountId: "custom-key")
+        let original = CodexBarConfig(active: selected, providers: [])
+        try self.writeAuthJSON(
+            accessToken: desktop.accessToken, refreshToken: desktop.refreshToken,
+            idToken: desktop.idToken, remoteAccountID: desktop.remoteAccountId
+        )
+        let authBefore = try Data(contentsOf: CodexPaths.authURL)
+        let result = store.reconcileAuthJSON(in: original)
+        XCTAssertTrue(result.changed)
+        XCTAssertEqual(result.config.active, selected)
+        XCTAssertEqual(result.config.oauthTokenAccounts().count, 1)
+        XCTAssertEqual(store.currentCodexAccountID(in: result.config), desktop.accountId)
+        XCTAssertEqual(try Data(contentsOf: CodexPaths.authURL), authBefore)
+        XCTAssertFalse(store.reconcileAuthJSON(in: result.config).changed)
+        XCTAssertFalse(store.reconcileAuthJSON(in: original, onlyAccountIDs: ["another-account"]).changed)
+    }
+
+    func testCurrentDesktopLoginTracksLogoutWithoutRemovingSavedAccounts() throws {
+        let store = CodexBarConfigStore()
+        let desktop = try self.makeOAuthAccount(accountID: "desktop-account", email: "desktop@example.com")
+        try self.writeAuthJSON(
+            accessToken: desktop.accessToken, refreshToken: desktop.refreshToken,
+            idToken: desktop.idToken, remoteAccountID: desktop.remoteAccountId
+        )
+        let result = store.reconcileAuthJSON(in: CodexBarConfig())
+        XCTAssertEqual(store.currentCodexAccountID(in: result.config), desktop.accountId)
+        try Data("{}".utf8).write(to: CodexPaths.authURL)
+        XCTAssertNil(store.currentCodexAccountID(in: result.config))
+        XCTAssertEqual(store.reconcileAuthJSON(in: result.config).config.oauthTokenAccounts().count, 1)
+    }
+
     func testLoadOrMigrateImportsOAuthLifecycleMetadataFromAuthJSON() throws {
         let store = CodexBarConfigStore()
         let tokenLastRefreshAt = Date(timeIntervalSince1970: 1_720_000_000)

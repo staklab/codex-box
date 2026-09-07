@@ -226,6 +226,30 @@ final class TokenStoreSettingsTests: CodexBarTestCase {
         XCTAssertEqual(store.localCostSummary.dailyEntries[0].costUSD, 0.001615, accuracy: 1e-12)
     }
 
+    func testInitializationRefreshesStaleCurrentSchemaCostCache() throws {
+        try self.writeCostSummaryCache(
+            schemaVersion: LocalCostSummary.currentSchemaVersion,
+            updatedAt: "2026-06-17T04:27:52Z"
+        )
+        let scanned = expectation(description: "已有缓存仍重新扫描会话")
+        scanned.assertForOverFulfill = false
+        let sessionStore = SessionLogStore(
+            codexRootURL: CodexPaths.codexRoot,
+            persistedCacheURL: CodexPaths.costSessionCacheURL
+        )
+        let store = self.makeTokenStore(
+            costSummaryService: LocalCostSummaryService(sessionLogStoreProvider: {
+                scanned.fulfill()
+                return sessionStore
+            }),
+            openRouterCatalogService: OpenRouterModelCatalogServiceSpy(
+                result: .failure(URLError(.notConnectedToInternet))
+            )
+        )
+        wait(for: [scanned], timeout: 3)
+        _ = store
+    }
+
     func testInitializationPublishesUsableCostSummaryWhenSomeSessionsAreIncomplete() throws {
         try self.writeCostSummaryCache(schemaVersion: nil, updatedAt: "2026-06-17T04:27:52Z")
         let fixture = Self.recentCostFixtureTimestamps()

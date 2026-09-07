@@ -28,13 +28,14 @@
 ## 核心特性
 
 - **共享凭据只读**：停用周期 OAuth 刷新，关闭 `CodexSyncService` 的 Codex Home 写入。
+- **登录账号识别**：只读同步 Codex 当前登录账号；通过“添加账号”在浏览器授权其他账号。账号登录状态与桌面会话控制状态分别显示。
 - **实时用量**：保留只读 `GET /wham/usage` 轮询，401 时不会触发 token 刷新。
 - **本地用量与成本**：扫描 Codex 本地 session，统计 token 与估算成本。
 - **运行档案**：每个档案使用独立 `CODEX_HOME` 启动 Codex CLI，账号与配置互不干扰。
 - **账号网关**：可选的本地 Responses 网关，退出时自动还原官方直连配置。
 - **皮肤市场**：支持 CodexPlusPlus-Themes、DreamSkin.cc、Codex-Dream-Skin、
   Awesome Codex Skins 与本地主题。
-- **CDP 壁纸注入**：深浅模式使用独立玻璃参数，支持热注入和真实截图验证。
+- **CDP 壁纸注入**：深浅模式使用独立玻璃参数；浅色正文使用局部衬底保证可读性。已有连接时热换肤，恢复默认时清除注入样式，应用启动自动恢复只复用现有连接。
 - **配置合并写入**：需要修改 `config.toml` 时只更新目标键，保留其他用户配置。
 
 ## 安全边界
@@ -86,6 +87,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 ```sh
 codesign --force --deep --sign - /tmp/ddbox/Build/Products/Release/codex-box.app
 ```
+
+皮肤事件循环回归可运行 `node scripts/test_skin_injection.cjs`（需要先安装 `windows/` 的开发依赖）。测试使用隔离 DOM，覆盖重复换肤、颜色检测、点击与恢复。
 
 ## 数据目录
 

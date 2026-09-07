@@ -4,12 +4,12 @@ enum OpenAIUsagePollingPolicy {
     static func accountToRefresh(
         activeProvider: CodexBarProvider?,
         activeAccount: TokenAccount?,
+        desktopAccount: TokenAccount? = nil,
         now: Date,
         maxAge: TimeInterval,
         force: Bool
     ) -> TokenAccount? {
-        guard activeProvider?.kind == .openAIOAuth,
-              let activeAccount,
+        guard let activeAccount = desktopAccount ?? (activeProvider?.kind == .openAIOAuth ? activeAccount : nil),
               activeAccount.isSuspended == false,
               activeAccount.tokenExpired == false else {
             return nil
@@ -90,10 +90,17 @@ final class OpenAIUsagePollingService {
     }
 
     private func refreshIfNeeded(force: Bool) async {
+        // 本地费用不依赖当前 Provider 或 OAuth 凭据是否可用。
+        self.store.refreshLocalCostSummary(
+            force: force,
+            minimumInterval: self.refreshInterval,
+            refreshSessionCache: true
+        )
         _ = try? self.store.reconcileAuthJSONIfNeeded()
         guard let account = OpenAIUsagePollingPolicy.accountToRefresh(
             activeProvider: self.store.activeProvider,
             activeAccount: self.store.activeAccount(),
+            desktopAccount: self.store.codexLoginAccountID.flatMap { self.store.oauthAccount(accountID: $0) },
             now: self.now(),
             maxAge: self.refreshInterval,
             force: force

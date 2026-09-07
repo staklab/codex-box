@@ -147,9 +147,10 @@ final class CodexPreviewServer: ObservableObject {
             // 界面配色只能靠注入：config.toml 的主题表不驱动界面（实测 #ff0000 无效）。
             // 因此无论用户点的是「应用配色」还是「应用+壁纸」，都要走注入。
             let injection = CodexSkinInjectionService.shared
+            let restarted = await injection.hasLiveDebugTarget() == false
             _ = try await injection.launchCodexWithDebugging()
             try await injection.injectSkin(themeID: themeID, themeService: themeService)
-            return #"{"ok":true,"message":"已应用（Codex 已重启并注入）","restarted":true}"#
+            return "{\"ok\":true,\"message\":\"主题已应用\",\"restarted\":\(restarted)}"
         } catch {
             let message = error.localizedDescription
                 .replacingOccurrences(of: "\"", with: "'")

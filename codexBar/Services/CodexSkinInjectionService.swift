@@ -81,6 +81,10 @@ final class CodexSkinInjectionService: ObservableObject {
 
     /// 以调试端口启动 Codex 桌面版。已在运行的实例注入不进去，必须由本方法启动。
     func launchCodexWithDebugging() async throws -> Int {
+        if await self.hasLiveDebugTarget(), let port = self.debugPort {
+            self.status = .connected(port: port)
+            return port
+        }
         self.status = .launching
 
         let port = Int.random(in: 49_152...65_535)
@@ -240,7 +244,7 @@ final class CodexSkinInjectionService: ObservableObject {
 
     // MARK: - 注入
 
-    /// 把主题的壁纸与 CSS 注入到所有页面目标。
+    /// 把主题的壁纸与 CSS 注入到桌面主页面。
     func injectSkin(themeID: String, themeService: CodexThemeService) async throws {
         guard let port = self.debugPort else {
             throw CodexThemeError.downloadFailed("尚未以调试端口启动 Codex")
@@ -249,7 +253,7 @@ final class CodexSkinInjectionService: ObservableObject {
         let css = try self.buildCSS(themeID: themeID, definition: definition, themeService: themeService)
 
         let targets = try await self.pageTargets(port: port)
-        for target in targets {
+        for target in targets where target.url == "app://-/index.html" || target.url.hasSuffix("/index.html") {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
             _ = try await self.evaluate(
                 javascript: Self.installerJS(css: css),
@@ -261,10 +265,16 @@ final class CodexSkinInjectionService: ObservableObject {
 
     /// 移除注入的样式（不需要重启应用）。
     func removeSkin() async throws {
-        guard let port = self.debugPort else { return }
+        guard await self.hasLiveDebugTarget(), let port = self.debugPort else { return }
         let targets = try await self.pageTargets(port: port)
         let js = """
-        (() => { const el = document.getElementById('codexbar-skin'); if (el) el.remove(); return 'removed'; })()
+        (() => {
+          window.__codexbarSkinAppearance?.restore();
+          delete window.__codexbarSkinAppearance;
+          const el = document.getElementById('codexbar-skin');
+          if (el) el.remove();
+          return 'removed';
+        })()
         """
         for target in targets {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
@@ -320,10 +330,10 @@ final class CodexSkinInjectionService: ObservableObject {
         \(accents.joined(separator: "\n"))
         }
 
-        /* 大面积容器在深浅模式下都保持透明。aside 自带 70% 模式底色，main 又从
+        /* 大面积容器在深浅模式下都保持透明。侧栏自带 70% 模式底色，main 又从
            侧栏边界开始而实际内容晚 16px 起步；分别着色会形成左上色块和竖向分隔带。 */
-        .electron-light aside.app-shell-left-panel,
-        .electron-dark aside.app-shell-left-panel,
+        .electron-light .app-shell-left-panel,
+        .electron-dark .app-shell-left-panel,
         .electron-light main.bg-surface,
         .electron-dark main.bg-surface,
         .electron-light main[class*="_MainContentSurface_"],
@@ -380,23 +390,60 @@ final class CodexSkinInjectionService: ObservableObject {
           box-shadow: none !important;
         }
 
-        .electron-light aside.app-shell-left-panel {
-          background: rgba(248, 250, 249, 0.18) !important;
-        }
-
-        /* aside::after 会继承同色背景并向 resize handle 右侧延伸，形成越界蒙版。 */
-        .electron-light aside.app-shell-left-panel::after {
+        /* 聊天侧栏为 aside，设置侧栏为 div；两者的补色伪元素都会向右越界。
+           深浅模式统一移除，避免侧栏边界出现独立竖带。 */
+        .electron-light .app-shell-left-panel::after,
+        .electron-dark .app-shell-left-panel::after {
           content: none !important;
           background: transparent !important;
         }
 
         /* 模式调节直接作用于壁纸层，避免独立蒙层与 Electron 标题栏分层合成。 */
         .electron-light body::before {
-          filter: contrast(0.82) saturate(0.90);
+          filter: saturate(1.05);
         }
 
         .electron-dark body::before {
           filter: brightness(0.55) saturate(0.90);
+        }
+
+        /* 浅色壁纸保留色彩，正文与输入区域分别承托深色文字。 */
+        .electron-light {
+          --wb-text-primary: #18232b !important;
+          --wb-text-tertiary: #1c252e !important;
+          --color-text-primary: #18232b !important;
+          --color-text-secondary: #1c252e !important;
+          --color-text-tertiary: #1c252e !important;
+        }
+        /* 标题栏、侧栏与主区共用连续的高透表面。 */
+        .electron-light main[class*="_MainContentSurface_"],
+        .electron-light header.h-toolbar,
+        .electron-light header[class*="h-toolbar"],
+        .electron-light .app-shell-left-panel {
+          background: rgba(248, 250, 249, 0.10) !important;
+          border-color: transparent !important;
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+        }
+        .electron-light header.h-toolbar,
+        .electron-light header[class*="h-toolbar"],
+        .electron-light .app-shell-left-panel {
+          text-shadow: none !important;
+        }
+        .electron-light .text-size-chat {
+          background: rgba(248, 250, 249, 0.56) !important;
+          border-radius: 12px;
+          box-shadow: 0 0 0 8px rgba(248, 250, 249, 0.56);
+        }
+        .electron-light [class*="_ComposerLayoutRoot_"] {
+          background: rgba(248, 250, 249, 0.76) !important;
+        }
+        .electron-light [role="menu"],
+        .electron-light [role="dialog"],
+        .electron-light [role="listbox"],
+        .electron-light pre {
+          background: rgba(248, 250, 249, 0.96) !important;
+          color: #18232b !important;
         }
 
         body::after {
@@ -469,6 +516,8 @@ final class CodexSkinInjectionService: ObservableObject {
         let encoded = Data(css.utf8).base64EncodedString()
         return """
         (() => {
+          window.__codexbarSkinAppearance?.restore();
+          delete window.__codexbarSkinAppearance;
           const css = atob('\(encoded)');
           let el = document.getElementById('codexbar-skin');
           if (!el) {

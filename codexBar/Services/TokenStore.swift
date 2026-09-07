@@ -135,6 +135,7 @@ final class TokenStore: ObservableObject {
     static let shared = TokenStore()
 
     @Published var accounts: [TokenAccount] = []
+    @Published private(set) var codexLoginAccountID: String?
     @Published private(set) var config: CodexBarConfig
     @Published private(set) var localCostSummary: LocalCostSummary = .empty
     @Published private(set) var historicalModels: [String]
@@ -937,6 +938,7 @@ final class TokenStore: ObservableObject {
 
     func reconcileAuthJSONIfNeeded(accountID: String? = nil) throws -> Bool {
         let changed = self.absorbNewerAuthJSONIfNeeded(accountID: accountID)
+        self.codexLoginAccountID = self.configStore.currentCodexAccountID(in: self.config)
         guard changed else { return false }
         try self.configStore.save(self.config)
         self.publishState()
@@ -1054,6 +1056,7 @@ final class TokenStore: ObservableObject {
     }
 
     private func pushPublishedState() {
+        self.codexLoginAccountID = self.configStore.currentCodexAccountID(in: self.config)
         self.accounts = self.config.oauthTokenAccounts()
         let publishedGatewayMode = self.publishedOpenAIGatewayMode
         self.openAIAccountGatewayService.updateState(
@@ -1441,11 +1444,9 @@ final class TokenStore: ObservableObject {
     }
 
     private func refreshLocalCostSummaryIfNeeded() {
-        guard self.localCostSummary.updatedAt == nil else { return }
         self.refreshLocalCostSummary(
-            force: true,
-            minimumInterval: 0,
-            refreshSessionCache: false
+            minimumInterval: 60,
+            refreshSessionCache: true
         )
     }
 

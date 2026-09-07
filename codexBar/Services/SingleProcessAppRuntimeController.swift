@@ -126,6 +126,6 @@ final class SingleProcessAppRuntimeController {
 
     func handleApplicationDidBecomeActive() async {
         self.tokenStore.load()
-        await self.oauthRefresh.refreshDueAccountsNow()
+        // 前台激活只读取桌面端更新后的登录态，由桌面端管理凭据续期。
     }
 }

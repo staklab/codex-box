@@ -291,7 +291,7 @@ enum CodexBarURLRouter {
                     let injection = CodexSkinInjectionService.shared
                     _ = try await injection.launchCodexWithDebugging()
                     try await injection.injectSkin(themeID: themeID, themeService: themeService)
-                    message = "配色与壁纸已应用（Codex 已重启）。"
+                    message = "配色与壁纸已应用。"
                 }
 
                 NotificationCenter.default.post(
@@ -335,7 +335,7 @@ enum CodexBarURLRouter {
                 NotificationCenter.default.post(
                     name: .codexbarThemeApplyDidFinish,
                     object: nil,
-                    userInfo: ["message": "已从 DreamSkin 安装并应用「\(listing.name)」（Codex 已重启并注入）。"]
+                    userInfo: ["message": "已从 DreamSkin 安装并应用「\(listing.name)」。"]
                 )
             } catch {
                 NotificationCenter.default.post(

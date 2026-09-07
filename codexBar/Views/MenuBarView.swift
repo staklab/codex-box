@@ -946,6 +946,7 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Text(self.desktopThreadSettings.targetLabel)
+                    .help("当前对话参数控制状态；Codex 登录账号在下方账号区显示。")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundColor(.secondary)
                 if self.desktopThreadSettings.isBusy {
@@ -1145,7 +1146,8 @@ struct MenuBarView: View {
                     .font(.system(size: 12))
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("login toolbar button")
+            .help("添加其他账号：在浏览器中登录 OpenAI")
+            .accessibilityLabel("添加 OpenAI 账号")
             .accessibilityIdentifier("codexbar.login-openai.toolbar")
 
             Button {
@@ -1313,11 +1315,29 @@ struct MenuBarView: View {
                 .padding(.horizontal, 10)
             }
 
+            HStack(spacing: 6) {
+                if let account = store.accounts.first(where: { $0.accountId == store.codexLoginAccountID }) {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundColor(.green)
+                    Text("Codex 已登录：\(account.email)")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("尚未读取到 Codex 登录账号")
+                        .foregroundColor(.secondary)
+                }
+                Spacer(minLength: 0)
+                Button("添加账号") { startOAuthLogin() }
+                    .buttonStyle(.borderless)
+            }
+            .font(.system(size: 10))
+            .padding(.horizontal, 10)
+
             if store.accounts.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No OpenAI account added.")
+                    Text("尚未添加 OpenAI 账号。")
                         .font(.system(size: 11, weight: .medium))
-                    Text("Use the toolbar plus button to add OpenAI OAuth accounts.")
+                    Text("登录 Codex 后会自动读取账号，也可点击“添加账号”在浏览器登录。")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }

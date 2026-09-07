@@ -86,7 +86,7 @@ final class CodexSkinPersistenceService: ObservableObject {
             return
         }
 
-        try? await self.applyNow(themeID: themeID, themeService: themeService, injection: injection)
+        // 自动恢复只复用现有连接；需要重新启动时由用户主动应用主题。
     }
 
     // MARK: - 接管 Codex 启动
