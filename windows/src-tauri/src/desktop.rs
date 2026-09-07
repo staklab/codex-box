@@ -245,11 +245,22 @@ fn stop_exact_codex_process(executable: &Path) -> anyhow::Result<()> {
     // 只请求此安装路径的窗口正常退出，避免 /IM Codex.exe 误杀其他会话的后台服务。
     let script = format!("{} | ForEach-Object {{ $p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; if ($p) {{ $null = $p.CloseMainWindow() }} }}", desktop_process_query(executable));
     powershell_lines(&script);
-    for _ in 0..40 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while std::time::Instant::now() < deadline {
         if !desktop_process_is_running(executable) { return Ok(()) }
         std::thread::sleep(Duration::from_millis(250));
     }
-    anyhow::bail!("Codex Desktop 尚未正常退出，请保存任务并手动关闭后重试")
+    // Windows 桌面可能把关闭窗口解释为隐藏到后台。调用方已获得重启确认；
+    // 只终止已验证路径的主进程树，绝不能按 Codex.exe 名称操作其他 CLI。
+    let roots = powershell_lines(&format!("{} | Where-Object {{ $_.CommandLine -notmatch '(?:^|\\s)--type=' }} | Select-Object -ExpandProperty ProcessId", desktop_process_query(executable)));
+    for pid in roots.iter().filter_map(|value| value.parse::<u32>().ok()) {
+        hidden_output("taskkill.exe", &["/PID", &pid.to_string(), "/T", "/F"]);
+    }
+    for _ in 0..20 {
+        if !desktop_process_is_running(executable) { return Ok(()) }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    anyhow::bail!("Codex Desktop 未能完全退出，请保存任务并手动关闭后重试")
 }
 
 #[cfg(not(target_os = "windows"))]

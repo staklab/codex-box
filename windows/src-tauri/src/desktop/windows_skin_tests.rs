@@ -1,5 +1,6 @@
 //! 在 Windows CI 使用真实 Electron/CDP 与独立 CLI 进程验证换肤链路。
 use super::*;
+use std::os::windows::process::CommandExt;
 
 const WALLPAPER_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAACI0lEQVR4nA3RoarAIBQA0Pc5Ly4ajcZF48KCmExiMMgw3DCGwSBj4QYRg0HkBdO+7e0DTjo/v7tZdkt2R3fPdlj3k+9h26PYk9ofs6PbM+w17C3tHfe/n19pFmmJdFR6JmGVJ5dhk1HIpORjJDqZQdYgW5Id5QeUWZQlylHlmYJVnVyFTUWhklKPUehUBlWDakl1VB/QZtGWaEe1ZxpWfXIdNh2FTko/RqPTGXQNuiXdUX/AmsVaYh21nllY7clt2GwUNin7GIvOZrA12JZsR/uBwyyHJYejh2cHrMfJj7AdURxJHY850B0ZjhqOlo6OxwfALGAJOAqeAaxwcggbRAFJwWMAHWSAGqAl6AgfuMxyWXI5enl2wXqd/ArbFcWV1PWYC92V4arhaunqeH0gmiVaEh2NnkVY48lj2GIUMan4mIguZog1xJZix/iB2yy3Jbejt2c3rPfJ77DdUdxJ3Y+50d0Z7hrulu6O9wfQLGgJOoqeIax4cgwbRoFJ4WMQHWbAGrAl7IgfKGYplhRHi2cF1nLyErYSRUmqPKagKxlKDaWl0rF8oJmlWdIcbZ41WNvJW9haFN9se0xD1zK0GlpLrWP7wDDLsGQ4OjwbsI6Tj7CNKEZS4zED3cgwahgtjY7jA9Ms05Lp6PRswjpPPsM2o5hJzcdMdDPDrGG2NDvOD7xmeS15HX09e2F9T/6G7Y3iTep9zIvuzfDW8Lb0dnz//gFmX4sQgThjagAAAABJRU5ErkJggg==";
 
@@ -97,13 +98,14 @@ async fn official_windows_skin_startup() {
     assert!(is_supported_executable(&desktop));
     let _guard=DesktopGuard(desktop.clone());
     assert!(!is_supported_executable(&desktop.parent().unwrap().join("resources/codex.exe")), "官方后台 CLI 不能被识别成桌面");
-    let ordinary = ChildGuard(Command::new(&desktop).spawn().unwrap());
+    let ordinary = ChildGuard(Command::new(&desktop).creation_flags(0x08000000).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap());
     tokio::time::sleep(Duration::from_secs(10)).await;
     let state=ThemeState{codex_executable:Some(desktop.to_string_lossy().into()),debug_port:Some(9),..Default::default()};
     assert!(ensure_debug_port(&state,false).await.is_err(), "普通启动需要重连确认");
     let (port,_)=match ensure_debug_port(&state,true).await {
         Ok(runtime) => runtime,
         Err(error) => {
+            std::fs::write(artifacts.join("official-startup-error.txt"),error.to_string()).unwrap();
             for port in find_running_debug_ports() {
                 if let Ok(target) = main_target(port).await {
                     if let Ok(text) = evaluate_target(&target, "document.body?.innerText", false).await {

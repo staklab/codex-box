@@ -15,6 +15,7 @@ app.whenReady().then(async () => {
   await main.loadURL('app://-/index.html');
   const avatar = new BrowserWindow({show:false,webPreferences:{preload:path.join(__dirname,'preload.cjs')}});
   await avatar.loadURL('app://-/avatar-overlay');
-  main.on('closed',()=>app.quit());
+  // 模拟官方 Windows 关闭窗口后仍驻留后台的行为。
+  main.on('close',event=>{event.preventDefault();main.hide()});
 });
 app.on('window-all-closed',()=>app.quit());
