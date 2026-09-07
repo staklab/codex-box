@@ -1,6 +1,8 @@
 //! 在 Windows CI 使用真实 Electron/CDP 与独立 CLI 进程验证换肤链路。
 use super::*;
 
+const WALLPAPER_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAACI0lEQVR4nA3RoarAIBQA0Pc5Ly4ajcZF48KCmExiMMgw3DCGwSBj4QYRg0HkBdO+7e0DTjo/v7tZdkt2R3fPdlj3k+9h26PYk9ofs6PbM+w17C3tHfe/n19pFmmJdFR6JmGVJ5dhk1HIpORjJDqZQdYgW5Id5QeUWZQlylHlmYJVnVyFTUWhklKPUehUBlWDakl1VB/QZtGWaEe1ZxpWfXIdNh2FTko/RqPTGXQNuiXdUX/AmsVaYh21nllY7clt2GwUNin7GIvOZrA12JZsR/uBwyyHJYejh2cHrMfJj7AdURxJHY850B0ZjhqOlo6OxwfALGAJOAqeAaxwcggbRAFJwWMAHWSAGqAl6AgfuMxyWXI5enl2wXqd/ArbFcWV1PWYC92V4arhaunqeH0gmiVaEh2NnkVY48lj2GIUMan4mIguZog1xJZix/iB2yy3Jbejt2c3rPfJ77DdUdxJ3Y+50d0Z7hrulu6O9wfQLGgJOoqeIax4cgwbRoFJ4WMQHWbAGrAl7IgfKGYplhRHi2cF1nLyErYSRUmqPKagKxlKDaWl0rF8oJmlWdIcbZ41WNvJW9haFN9se0xD1zK0GlpLrWP7wDDLsGQ4OjwbsI6Tj7CNKEZS4zED3cgwahgtjY7jA9Ms05Lp6PRswjpPPsM2o5hJzcdMdDPDrGG2NDvOD7xmeS15HX09e2F9T/6G7Y3iTep9zIvuzfDW8Lb0dnz//gFmX4sQgThjagAAAABJRU5ErkJggg==";
+
 struct ChildGuard(std::process::Child);
 impl Drop for ChildGuard {
     fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
@@ -60,7 +62,7 @@ async fn windows_skin_end_to_end() {
     let dir = paths::themes_root().unwrap().join(&theme_id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("theme.json"), br##"{"colors":{"accent":"#308050"}}"##).unwrap();
-    std::fs::write(dir.join("image.png"), STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAACI0lEQVR4nA3RoarAIBQA0Pc5Ly4ajcZF48KCmExiMMgw3DCGwSBj4QYRg0HkBdO+7e0DTjo/v7tZdkt2R3fPdlj3k+9h26PYk9ofs6PbM+w17C3tHfe/n19pFmmJdFR6JmGVJ5dhk1HIpORjJDqZQdYgW5Id5QeUWZQlylHlmYJVnVyFTUWhklKPUehUBlWDakl1VB/QZtGWaEe1ZxpWfXIdNh2FTko/RqPTGXQNuiXdUX/AmsVaYh21nllY7clt2GwUNin7GIvOZrA12JZsR/uBwyyHJYejh2cHrMfJj7AdURxJHY850B0ZjhqOlo6OxwfALGAJOAqeAaxwcggbRAFJwWMAHWSAGqAl6AgfuMxyWXI5enl2wXqd/ArbFcWV1PWYC92V4arhaunqeH0gmiVaEh2NnkVY48lj2GIUMan4mIguZog1xJZix/iB2yy3Jbejt2c3rPfJ77DdUdxJ3Y+50d0Z7hrulu6O9wfQLGgJOoqeIax4cgwbRoFJ4WMQHWbAGrAl7IgfKGYplhRHi2cF1nLyErYSRUmqPKagKxlKDaWl0rF8oJmlWdIcbZ41WNvJW9haFN9se0xD1zK0GlpLrWP7wDDLsGQ4OjwbsI6Tj7CNKEZS4zED3cgwahgtjY7jA9Ms05Lp6PRswjpPPsM2o5hJzcdMdDPDrGG2NDvOD7xmeS15HX09e2F9T/6G7Y3iTep9zIvuzfDW8Lb0dnz//gFmX4sQgThjagAAAABJRU5ErkJggg==").unwrap()).unwrap();
+    std::fs::write(dir.join("image.png"), STANDARD.decode(WALLPAPER_BASE64).unwrap()).unwrap();
     for mode in ["dark", "light"] {
         evaluate_target(&target, &format!("document.documentElement.className='electron-{mode}'"), false).await.unwrap();
         inject_theme(&theme_id, port).await.unwrap();
@@ -83,4 +85,37 @@ async fn windows_skin_end_to_end() {
     assert!(sentinel.0.try_wait().unwrap().is_none());
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::write(artifacts.join("result.json"),json!({"passed":true,"ordinaryPid":ordinary_pid,"port":port,"cliPreserved":true,"modes":["dark","light"],"repeatApply":true,"physicalClick":true,"restore":true,"overlayUntouched":true}).to_string()).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "由 Windows 工作流安装官方 MSIX 后运行；使用 CI 空白登录环境"]
+async fn official_windows_skin_startup() {
+    assert_eq!(std::env::var("CI").as_deref(), Ok("true"));
+    let desktop=PathBuf::from(std::env::var("CODEX_BOX_E2E_OFFICIAL").unwrap());
+    let artifacts=PathBuf::from(std::env::var("CODEX_BOX_E2E_ARTIFACTS").unwrap());
+    std::fs::create_dir_all(&artifacts).unwrap();
+    assert!(is_supported_executable(&desktop));
+    let _guard=DesktopGuard(desktop.clone());
+    let state=ThemeState{codex_executable:Some(desktop.to_string_lossy().into()),..Default::default()};
+    let (port,_)=ensure_debug_port(&state,true).await.unwrap();
+    let target=healthy_main_target(port).await.unwrap();
+    let screenshot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
+    std::fs::write(artifacts.join("official-before.png"),STANDARD.decode(screenshot["data"].as_str().unwrap()).unwrap()).unwrap();
+    let theme_id=format!("official-e2e-{}",uuid::Uuid::new_v4());
+    let dir=paths::themes_root().unwrap().join(&theme_id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("theme.json"),br##"{"colors":{"accent":"#308050"}}"##).unwrap();
+    // 有效的 PNG，使用上一个测试同款程序化壁纸。
+    std::fs::write(dir.join("image.png"),STANDARD.decode(WALLPAPER_BASE64).unwrap()).unwrap();
+    inject_theme(&theme_id,port).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    healthy_main_target(port).await.unwrap();
+    let style=evaluate_target(&target,"document.getElementById('codexbox-skin')?.sheet?.cssRules.length",false).await.unwrap();
+    assert!(style.as_u64().unwrap_or(0)>0);
+    let screenshot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
+    std::fs::write(artifacts.join("official-after.png"),STANDARD.decode(screenshot["data"].as_str().unwrap()).unwrap()).unwrap();
+    remove_skin(port).await.unwrap();
+    healthy_main_target(port).await.unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    std::fs::write(artifacts.join("official-result.json"),json!({"passed":true,"version":std::env::var("CODEX_BOX_E2E_OFFICIAL_VERSION").unwrap(),"startup":true,"injection":true,"restore":true,"authenticatedSession":false}).to_string()).unwrap();
 }

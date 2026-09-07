@@ -219,13 +219,16 @@ pub async fn ensure_debug_port(state: &ThemeState, restart: bool) -> anyhow::Res
         command.creation_flags(0x08000000);
     }
     command.spawn()?;
-    for _ in 0..60 {
-        if healthy_main_target(port).await.is_ok() {
-            return Ok((port, executable.to_string_lossy().into_owned()));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    let mut last_error = String::new();
+    while tokio::time::Instant::now() < deadline {
+        match healthy_main_target(port).await {
+            Ok(_) => return Ok((port, executable.to_string_lossy().into_owned())),
+            Err(error) => last_error = error.to_string(),
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    anyhow::bail!("Codex 调试端口未在 15 秒内就绪")
+    anyhow::bail!("Codex 换肤连接未在 45 秒内就绪：{last_error}")
 }
 
 #[cfg(target_os = "windows")]

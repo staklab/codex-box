@@ -43,6 +43,11 @@ jobs:
         run: ./tests/prepare-skin-e2e.ps1
       - name: Windows 换肤与进程隔离测试
         run: cargo test --manifest-path src-tauri/Cargo.toml windows_skin_end_to_end -- --ignored --nocapture
+      - name: 安装官方 Codex Windows 验证客户端
+        shell: pwsh
+        run: ./tests/prepare-official-skin-e2e.ps1
+      - name: 官方 Windows Codex 启动与换肤测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml official_windows_skin_startup -- --ignored --nocapture
       - name: 保存换肤截图与测试结果
         if: always()
         uses: actions/upload-artifact@v4
