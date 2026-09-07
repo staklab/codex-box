@@ -97,7 +97,21 @@ async fn official_windows_skin_startup() {
     assert!(is_supported_executable(&desktop));
     let _guard=DesktopGuard(desktop.clone());
     let state=ThemeState{codex_executable:Some(desktop.to_string_lossy().into()),..Default::default()};
-    let (port,_)=ensure_debug_port(&state,true).await.unwrap();
+    let (port,_)=match ensure_debug_port(&state,true).await {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            for port in find_running_debug_ports() {
+                if let Ok(target) = main_target(port).await {
+                    if let Ok(text) = evaluate_target(&target, "document.body?.innerText", false).await {
+                        std::fs::write(artifacts.join("official-startup-error.json"), text.to_string()).unwrap();
+                    }
+                    let shot = cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
+                    std::fs::write(artifacts.join("official-startup-error.png"),STANDARD.decode(shot["data"].as_str().unwrap()).unwrap()).unwrap();
+                }
+            }
+            panic!("官方客户端启动失败：{error}");
+        }
+    };
     let target=healthy_main_target(port).await.unwrap();
     let screenshot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
     std::fs::write(artifacts.join("official-before.png"),STANDARD.decode(screenshot["data"].as_str().unwrap()).unwrap()).unwrap();
