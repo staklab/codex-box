@@ -3,9 +3,8 @@ use crate::models::{DesktopStatus, ThemeColors, ThemeState, ThreadPreset};
 use crate::{paths, themes};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -18,13 +17,6 @@ struct CdpTarget {
     kind: String,
     url: Option<String>,
     web_socket_debugger_url: Option<String>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadPresetFile {
-    #[serde(default)]
-    threads: HashMap<String, ThreadPreset>,
 }
 
 pub fn find_codex_executable(configured: Option<&str>) -> Option<PathBuf> {
@@ -339,9 +331,33 @@ async fn page_targets(port: u16) -> anyhow::Result<Vec<CdpTarget>> {
 }
 
 async fn main_target(port: u16) -> anyhow::Result<CdpTarget> {
-    select_main_target(page_targets(port).await?)
+    let targets = page_targets(port).await?;
+    let candidates: Vec<_> = targets.into_iter().filter(|target| {
+        target.url.as_deref().and_then(|value| url::Url::parse(value).ok()).is_some_and(|url|
+            url.scheme() == "app" && url.host_str() == Some("-") && url.path() == "/index.html")
+    }).collect();
+    let mut states = Vec::new();
+    for target in &candidates {
+        let state = tokio::time::timeout(Duration::from_secs(2), evaluate_target_inner(target,
+            include_str!("../../../codexBar/Resources/desktop-window-focus.js"), false)).await;
+        let state = state.ok().and_then(Result::ok).unwrap_or(Value::Null);
+        states.push((state["focused"].as_bool().unwrap_or(false), state["lastFocus"].as_f64().unwrap_or(0.0)));
+    }
+    if candidates.len() == 1 { return Ok(candidates[0].clone()); }
+    if let Some(index) = active_window_index(&states) { return Ok(candidates[index].clone()); }
+    anyhow::bail!("请先点击需要控制的 Codex 窗口，再打开 codex-box")
 }
 
+fn active_window_index(states: &[(bool, f64)]) -> Option<usize> {
+    let focused: Vec<_> = states.iter().enumerate().filter(|(_, s)| s.0).map(|(i, _)| i).collect();
+    if focused.len() == 1 { return Some(focused[0]); }
+    if !focused.is_empty() { return None; }
+    let latest = states.iter().map(|s| s.1).fold(0.0_f64, f64::max);
+    let matches: Vec<_> = states.iter().enumerate().filter(|(_, s)| s.1 == latest && latest > 0.0).map(|(i, _)| i).collect();
+    if matches.len() == 1 { Some(matches[0]) } else { None }
+}
+
+#[cfg(test)]
 fn select_main_target(targets: Vec<CdpTarget>) -> anyhow::Result<CdpTarget> {
     targets.into_iter().find(|target| {
         target.url.as_deref().and_then(|url| url::Url::parse(url).ok()).is_some_and(|url| {
@@ -370,7 +386,7 @@ async fn evaluate_target(
     expression: &str,
     await_promise: bool,
 ) -> anyhow::Result<Value> {
-    tokio::time::timeout(Duration::from_secs(20), evaluate_target_inner(target, expression, await_promise))
+    tokio::time::timeout(Duration::from_secs(if expression.contains("const timeoutMs=60000;") {65} else {20}), evaluate_target_inner(target, expression, await_promise))
         .await.map_err(|_| anyhow::anyhow!("Codex 调试连接超时"))?
 }
 
@@ -469,7 +485,6 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
 .app-shell-left-panel::after{{content:none!important;background:transparent!important}}
 .electron-light .app-shell-left-panel,.electron-light main[class*="_MainContentSurface_"],.electron-light header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
 .electron-light{{--color-text-primary:#18232b!important;--color-text-secondary:#1c252e!important;--color-text-tertiary:#1c252e!important}}
-.electron-light .text-size-chat{{background:rgba(248,250,249,.56)!important;border-radius:12px;box-shadow:0 0 0 8px rgba(248,250,249,.56)}}
 .electron-light [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
 body::after{{content:none!important}}
 "#,
@@ -527,19 +542,28 @@ pub async fn desktop_status(state: &ThemeState, fallback: ThreadPreset) -> Deskt
             debug_port: None,
         };
     };
-    match current_route(port).await {
-        Ok((target, conversation_id)) => DesktopStatus {
+    let snapshot = async {
+        let (target, id, _) = current_route(port).await?;
+        let mut preset = if let Some(id) = &id { read_thread_preset(port, id).await? }
+            else { read_global_preset().unwrap_or(fallback.clone()) };
+        let (_, confirmed_id, tier) = current_route(port).await?;
+        anyhow::ensure!(id == confirmed_id, "当前对话正在切换");
+        if let Some(tier) = tier { preset.service_tier = tier; }
+        else if id.is_some() { preset.service_tier = "unknown".into(); }
+        Ok::<_, anyhow::Error>((target, id, preset))
+    }.await;
+    match snapshot {
+        Ok((target, conversation_id, preset)) => DesktopStatus {
             connected: true,
             target,
-            preset: preset_for_thread(conversation_id.as_deref())
-                .unwrap_or_else(|| read_global_preset().unwrap_or(fallback)),
+            preset,
             conversation_id,
             codex_executable: executable,
             debug_port: Some(port),
         },
-        Err(_) => DesktopStatus {
+        Err(error) => DesktopStatus {
             connected: false,
-            target: "已识别，调试连接不可用".into(),
+            target: format!("会话控制不可用：{error}"),
             conversation_id: None,
             preset: read_global_preset().unwrap_or(fallback),
             codex_executable: executable,
@@ -548,8 +572,8 @@ pub async fn desktop_status(state: &ThemeState, fallback: ThreadPreset) -> Deskt
     }
 }
 
-async fn current_route(port: u16) -> anyhow::Result<(String, Option<String>)> {
-    let script = r#"(() => {const root=window.__codexRoot?._internalRoot?.current;if(!root)return JSON.stringify({routeKind:'unavailable',conversationID:null});const routes=[],seenFibers=new Set(),seenObjects=new WeakSet(),stack=[root];const scan=(value,depth=0)=>{if(depth>5||value==null||typeof value!=='object'||seenObjects.has(value))return;seenObjects.add(value);try{if(typeof value.routeKind==='string')routes.push({routeKind:value.routeKind,conversationID:typeof value.conversationId==='string'?value.conversationId:null});for(const key of Object.keys(value).slice(0,100)){if(/children|return|child|sibling|stateNode|alternate|_owner/i.test(key))continue;scan(value[key],depth+1)}}catch(_){}};let count=0;while(stack.length&&count<50000){const fiber=stack.pop();if(!fiber||seenFibers.has(fiber))continue;seenFibers.add(fiber);count++;scan(fiber.memoizedProps);scan(fiber.pendingProps);scan(fiber.memoizedState);if(fiber.child)stack.push(fiber.child);if(fiber.sibling)stack.push(fiber.sibling)}const active=routes.find(route=>route.routeKind==='local-thread'&&route.conversationID);if(active)return JSON.stringify(active);const home=routes.find(route=>route.routeKind==='home'||route.routeKind==='new-thread-panel');return JSON.stringify(home??{routeKind:'unavailable',conversationID:null})})()"#;
+async fn current_route(port: u16) -> anyhow::Result<(String, Option<String>, Option<String>)> {
+    let script = include_str!("../../../codexBar/Resources/desktop-thread-route.js");
     let value = evaluate_target(&main_target(port).await?, script, false).await?;
     let route: Value = serde_json::from_str(value.as_str().unwrap_or("{}"))?;
     let kind = route
@@ -563,9 +587,15 @@ async fn current_route(port: u16) -> anyhow::Result<(String, Option<String>)> {
     let target = match (kind, conversation.as_deref()) {
         ("local-thread", Some(id)) => format!("当前对话 · {}", &id[..id.len().min(8)]),
         ("home" | "new-thread-panel", _) => "新对话默认".into(),
-        _ => "未识别当前页面".into(),
+        _ => anyhow::bail!("无法唯一识别当前本地对话"),
     };
-    Ok((target, conversation))
+    let tier = if route["serviceTierKnown"] == true {
+        Some(match route["serviceTier"].as_str().unwrap_or("default") {
+            "priority" => "fast",
+            value => value,
+        }.to_owned())
+    } else { None };
+    Ok((target, conversation, tier))
 }
 
 pub async fn update_thread_settings(
@@ -573,54 +603,85 @@ pub async fn update_thread_settings(
     conversation_id: Option<&str>,
     preset: &ThreadPreset,
 ) -> anyhow::Result<()> {
-    validate_preset(preset)?;
-    if let (Some(port), Some(thread_id)) = (port, conversation_id) {
-        let params = json!({
-            "threadId": thread_id,
-            "model": preset.model,
-            "reasoningEffort": preset.reasoning_effort,
-            "serviceTier": preset.service_tier,
-        });
+    let port = port.ok_or_else(|| anyhow::anyhow!("会话控制未连接"))?;
+    let (_, current_id, previous_tier) = current_route(port).await?;
+    anyhow::ensure!(current_id.as_deref() == conversation_id, "当前对话已变化，请刷新后再修改");
+    if let Some(thread_id) = conversation_id {
+        let previous = read_thread_preset(port, thread_id).await?;
+        anyhow::ensure!(preset.context_window == previous.context_window,
+            "Codex 不支持在线修改已加载对话的上下文窗口");
+        anyhow::ensure!(!preset.model.trim().is_empty(), "模型不能为空");
+        let mut params = json!({"threadId": thread_id, "model": preset.model});
+        let changed_tier = preset.service_tier != "unknown" && previous_tier.as_deref() != Some(&preset.service_tier);
+        if changed_tier { params["serviceTier"] = json!(preset.service_tier); }
+        anyhow::ensure!(preset.reasoning_effort != "default" || previous.reasoning_effort == "default",
+            "请明确选择思考强度；当前协议的空值会保留原设置");
+        if preset.reasoning_effort != "default" {
+            params["effort"] = json!(preset.reasoning_effort);
+        }
         send_desktop_request(port, "thread/settings/update", params).await?;
-        send_desktop_request(
-            port,
-            "thread/resume",
-            json!({"threadId": thread_id, "config": {"model_context_window": preset.context_window}}),
-        )
-        .await?;
-        persist_thread_preset(thread_id, preset)?;
+        let actual = read_thread_preset(port, thread_id).await?;
+        anyhow::ensure!(actual.model == preset.model && actual.reasoning_effort == preset.reasoning_effort,
+            "Codex 返回设置与请求不一致，请刷新后重试");
+        let (_, confirmed_id, confirmed_tier) = current_route(port).await?;
+        anyhow::ensure!(confirmed_id.as_deref() == Some(thread_id),
+            "设置已发送到原对话，但当前页面已切换，请刷新查看");
+        anyhow::ensure!(!changed_tier || confirmed_tier.as_deref() == Some(&preset.service_tier),
+            "Codex 尚未确认速度模式，请刷新后查看");
     } else {
+        validate_preset(preset)?;
         write_global_preset(preset)?;
     }
     Ok(())
 }
 
-fn preset_for_thread(thread_id: Option<&str>) -> Option<ThreadPreset> {
-    let thread_id = thread_id?;
-    let data = std::fs::read(paths::thread_presets_path().ok()?).ok()?;
-    let file: ThreadPresetFile = serde_json::from_slice(&data).ok()?;
-    file.threads.get(thread_id).cloned()
+async fn read_thread_preset(port: u16, thread_id: &str) -> anyhow::Result<ThreadPreset> {
+    let result = send_desktop_request(port, "thread/read",
+        json!({"threadId": thread_id, "includeTurns": false})).await?;
+    let thread = &result["thread"];
+    anyhow::ensure!(thread["id"].as_str() == Some(thread_id), "Codex 返回的对话不匹配");
+    let model = thread["model"].as_str().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Codex 未返回真实模型设置"))?;
+    let record = read_branch_record(thread_id).ok().flatten();
+    let after = record.as_ref().and_then(|r| r["createdAt"].as_str());
+    let context = thread["path"].as_str().and_then(|path| actual_context_window(path, model, after)).unwrap_or(0);
+    Ok(ThreadPreset { model: model.into(),
+        reasoning_effort: thread["reasoningEffort"].as_str().unwrap_or("default").into(),
+        service_tier: "unknown".into(), context_window: context })
 }
 
-fn persist_thread_preset(thread_id: &str, preset: &ThreadPreset) -> anyhow::Result<()> {
-    let path = paths::thread_presets_path()?;
-    let mut file = std::fs::read(&path)
-        .ok()
-        .and_then(|data| serde_json::from_slice::<ThreadPresetFile>(&data).ok())
-        .unwrap_or_default();
-    file.threads.insert(thread_id.to_owned(), preset.clone());
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+fn actual_context_window(path: &str, model: &str, after: Option<&str>) -> Option<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(size.saturating_sub(4 * 1024 * 1024))).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let tail = String::from_utf8_lossy(&bytes);
+    let mut window = None;
+    for line in tail.lines().rev() {
+        let Ok(event) = serde_json::from_str::<Value>(line) else { continue };
+        if let Some(after) = after {
+            let cutoff = chrono::DateTime::parse_from_rfc3339(after).ok();
+            let timestamp = event["timestamp"].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
+            if cutoff.is_none() || timestamp.is_none() || timestamp <= cutoff { continue; }
+        }
+        if event["type"] == "turn_context" {
+            return if event["payload"]["model"] == model { window } else { None };
+        }
+        if window.is_none() && event["type"] == "event_msg" && event["payload"]["type"] == "token_count" {
+            window = event["payload"]["info"]["model_context_window"].as_u64().filter(|n| *n > 0);
+        }
     }
-    std::fs::write(path, serde_json::to_vec_pretty(&file)?)?;
-    Ok(())
+    None
 }
 
 async fn send_desktop_request(port: u16, method: &str, params: Value) -> anyhow::Result<Value> {
     let request = json!({"method": method, "params": params});
     let encoded = STANDARD.encode(serde_json::to_vec(&request)?);
+    let timeout_ms = if method == "thread/fork" { 60000 } else { 10000 };
     let script = format!(
-        r#"(() => new Promise((resolve) => {{const payload=JSON.parse(atob('{encoded}'));const requestId=`codex-box-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`;let finished=false;const finish=(value)=>{{if(finished)return;finished=true;window.removeEventListener('message',listener);clearTimeout(timer);resolve(JSON.stringify(value))}};const listener=(event)=>{{const envelope=event.data;const response=envelope?.message??envelope?.response;if(envelope?.type!=='mcp-response'||String(response?.id)!==requestId)return;if(response.error)finish({{ok:false,error:response.error}});else finish({{ok:true,result:response.result??{{}}}})}};const timer=setTimeout(()=>finish({{ok:false,error:{{message:'Codex 桌面请求超时'}}}}),12000);window.addEventListener('message',listener);window.electronBridge.sendMessageFromView({{type:'mcp-request',hostId:'local',priority:'critical',source:'thread',timeoutMs:10000,expiresAtMs:Date.now()+10000,request:{{id:requestId,method:payload.method,params:payload.params}}}}).catch(error=>finish({{ok:false,error:{{message:String(error)}}}}))}}))()"#
+        r#"(() => new Promise((resolve) => {{const payload=JSON.parse(atob('{encoded}'));const timeoutMs={timeout_ms};const requestId=`codex-box-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`;let finished=false;const finish=(value)=>{{if(finished)return;finished=true;window.removeEventListener('message',listener);clearTimeout(timer);resolve(JSON.stringify(value))}};const listener=(event)=>{{const envelope=event.data;const response=envelope?.message??envelope?.response;if(envelope?.type!=='mcp-response'||String(response?.id)!==requestId)return;if(response.error)finish({{ok:false,error:response.error}});else {{let result=response.result??{{}};if(payload.method==='thread/fork')result={{thread:{{id:result.thread?.id}},model:result.model,reasoningEffort:result.reasoningEffort}};finish({{ok:true,result}})}}}};const timer=setTimeout(()=>finish({{ok:false,error:{{message:'Codex 桌面请求超时'}}}}),timeoutMs+2000);window.addEventListener('message',listener);window.electronBridge.sendMessageFromView({{type:'mcp-request',hostId:'local',priority:'critical',source:'thread',timeoutMs,expiresAtMs:Date.now()+timeoutMs,request:{{id:requestId,method:payload.method,params:payload.params}}}}).catch(error=>finish({{ok:false,error:{{message:String(error)}}}}))}}))()"#
     );
     let value = evaluate_target(&main_target(port).await?, &script, true).await?;
     let envelope: Value = serde_json::from_str(value.as_str().unwrap_or("{}"))?;
@@ -707,9 +768,75 @@ fn normalized_hex(value: Option<&str>) -> Option<String> {
     }
 }
 
+
+pub fn context_info(model: &str, conversation_id: Option<&str>) -> anyhow::Result<Value> {
+    let catalog: Value = std::fs::read(paths::codex_root()?.join("models_cache.json")).ok()
+        .and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or(Value::Null);
+    let entry = catalog["models"].as_array().and_then(|models| models.iter().find(|entry| entry["slug"] == model));
+    let maximum = entry.and_then(|e| e["max_context_window"].as_u64());
+    let percent = entry.and_then(|e| e["effective_context_window_percent"].as_u64()).filter(|p| (1..=100).contains(p));
+    let saved = conversation_id.and_then(|id| read_branch_record(id).ok().flatten());
+    Ok(json!({"maximum":maximum,"percent":percent,"configured":saved.map(|v|v["window"].clone())}))
+}
+
+fn read_branch_record(id: &str) -> anyhow::Result<Option<Value>> {
+    let id = uuid::Uuid::parse_str(id)?;
+    let path = paths::app_root()?.join("context-branches").join(format!("{id}.json"));
+    if !path.exists() { return Ok(None); }
+    Ok(Some(serde_json::from_slice(&std::fs::read(path)?)?))
+}
+
+static FORKING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub async fn create_context_branch(port: u16, source: &str, window: u64) -> anyhow::Result<String> {
+    let _guard = FORKING.try_lock().map_err(|_| anyhow::anyhow!("分支正在创建，请勿重复提交"))?;
+    anyhow::ensure!((16000..=2000000).contains(&window), "上下文配置超出范围");
+    uuid::Uuid::parse_str(source)?;
+    anyhow::ensure!(current_route(port).await?.1.as_deref() == Some(source), "当前对话已变化");
+    let read = send_desktop_request(port, "thread/read", json!({"threadId":source,"includeTurns":false})).await?;
+    anyhow::ensure!(read["thread"]["id"] == source && read["thread"]["status"]["type"] == "idle", "请等待原对话生成完成");
+    anyhow::ensure!(current_route(port).await?.1.as_deref() == Some(source), "当前对话已变化");
+    let result = send_desktop_request(port, "thread/fork", json!({"threadId":source,"excludeTurns":true,"config":{"model_context_window":window}})).await?;
+    let id = result["thread"]["id"].as_str().ok_or_else(||anyhow::anyhow!("Codex 未返回新分支 ID"))?;
+    let parsed = uuid::Uuid::parse_str(id)?;
+    anyhow::ensure!(id != source, "返回的分支 ID 与原对话相同");
+    let root = paths::app_root()?.join("context-branches");
+    std::fs::create_dir_all(&root)?;
+    std::fs::write(root.join(format!("{parsed}.json")), serde_json::to_vec(&json!({"window":window,"createdAt":chrono::Utc::now().to_rfc3339()}))?)
+        .map_err(|e| anyhow::anyhow!("分支已创建（{id}），保存配置失败：{e}"))?;
+    if current_route(port).await?.1.as_deref() == Some(source) {
+        let script = format!("window.postMessage({{type:'navigate-to-route',path:{}}},'*');true",serde_json::to_string(&format!("/local/{id}"))?);
+        evaluate_target(&main_target(port).await?, &script, false).await
+            .map_err(|e|anyhow::anyhow!("分支已创建（{id}），请从会话列表打开：{e}"))?;
+    }
+    Ok(id.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_selection_and_query_routes() {
+        assert_eq!(active_window_index(&[(false,10.0),(false,20.0)]),Some(1));
+        assert_eq!(active_window_index(&[(true,10.0),(false,20.0)]),Some(0));
+        assert_eq!(active_window_index(&[(false,0.0),(false,0.0)]),None);
+        assert_eq!(active_window_index(&[(false,20.0),(false,20.0)]),None);
+        let target = CdpTarget { kind:"page".into(),url:Some("app://-/index.html?initialRoute=%2Flocal%2Fbranch".into()),web_socket_debugger_url:Some("ws://127.0.0.1/fixture".into()) };
+        assert!(select_main_target(vec![target]).is_ok());
+    }
+
+    #[test]
+    fn context_window_belongs_to_latest_turn_model() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        std::fs::write(&path, concat!(
+            "{\"type\":\"turn_context\",\"payload\":{\"model\":\"old\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"model_context_window\":258400}}}\n"
+        )).unwrap();
+        assert_eq!(actual_context_window(path.to_str().unwrap(), "old", None), Some(258400));
+        assert_eq!(actual_context_window(path.to_str().unwrap(), "new", None), None);
+    }
 
     #[test]
     fn no_proxy_always_contains_loopback() {

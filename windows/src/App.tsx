@@ -95,24 +95,76 @@ function Overview({ dashboard, loading, busyId, setBusyId, run, login, manualFlo
   </>;
 }
 
-function DesktopPanel({ dashboard, run }: { dashboard: Dashboard; run: (action: () => Promise<unknown>, success?: string) => Promise<void> }) {
+function DesktopPanel({ dashboard, run, confirmAction }: { confirmAction: ConfirmAction; dashboard: Dashboard; run: (action: () => Promise<unknown>, success?: string) => Promise<void> }) {
   const [status, setStatus] = useState<DesktopStatus | null>(null);
   const [manualPath, setManualPath] = useState("");
   const [preset, setPreset] = useState<ThreadPreset>({ model: "gpt-5.6-sol", reasoningEffort: "medium", serviceTier: "flex", contextWindow: 272000 });
-  const refresh = useCallback(async () => { const next = await api.desktopStatus(); setStatus(next); setPreset(next.preset); }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
-  function field<K extends keyof ThreadPreset>(key: K, value: ThreadPreset[K]) { setPreset(current => ({ ...current, [key]: value })); }
+  const [context, setContext] = useState<{maximum: number | null; percent: number | null; configured: number | null} | null>(null);
+  const [branchWindow, setBranchWindow] = useState(1000000);
+  const [forking, setForking] = useState(false);
+  const forkLock = useRef(false);
+  const dirty = useRef(false);
+  const reading = useRef(false);
+  const applying = useRef(false);
+  const currentStatus = useRef<DesktopStatus | null>(null);
+  const refresh = useCallback(async () => {
+    if (reading.current || applying.current) return;
+    reading.current = true;
+    try {
+      const next = await api.desktopStatus();
+      if (applying.current) return;
+      const changed = currentStatus.current?.conversationId !== next.conversationId || currentStatus.current?.target !== next.target;
+      if (changed || !dirty.current) {
+        dirty.current = false;
+        currentStatus.current = next;
+        setStatus(next); setPreset(next.preset);
+        const info = await api.contextInfo(next.preset.model, next.conversationId).catch(() => null);
+        if (currentStatus.current === next) setContext(info);
+      }
+    } finally { reading.current = false; }
+  }, []);
+  useEffect(() => {
+    const poll = () => { if (!document.hidden) void refresh().catch(() => {}); };
+    poll(); const timer = window.setInterval(poll, 2000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+  function field<K extends keyof ThreadPreset>(key: K, value: ThreadPreset[K]) { dirty.current = true; setPreset(current => ({ ...current, [key]: value })); }
+  async function apply() {
+    if (applying.current || !status?.connected) return;
+    applying.current = true;
+    try {
+      await run(() => api.updateDesktopSettings(preset, status.conversationId, status.preset), status.conversationId ? "Codex 已确认模型与思考强度设置" : "已保存新对话默认值；已打开的编辑器可能保留自己的选择");
+    } finally { applying.current = false; dirty.current = false; await refresh(); }
+  }
+  function windowLabel(value: number) {
+    const estimated = context?.maximum && context?.percent ? Math.floor(Math.min(value, context.maximum) * context.percent / 100) : null;
+    return `配置 ${value.toLocaleString()} → ${estimated === null ? "有效值待上报" : `预计有效 ${estimated.toLocaleString()}`}${context?.maximum && value > context.maximum ? "（受模型上限限制）" : ""}`;
+  }
+  async function createBranch() {
+    if (!status?.conversationId || !status.connected || forkLock.current) return;
+    const id = status.conversationId;
+    const window = branchWindow;
+    if (!Number.isInteger(window) || window < 16000 || window > 2000000) return;
+    if (!await confirmAction("继承历史创建上下文分支？", `${windowLabel(window)}。原对话保留，实际上报可能与预计值不同。`)) return;
+    forkLock.current = true; setForking(true);
+    try { await run(async () => { await api.createContextBranch(id, window); }, "分支已创建，窗口配置已保存；实际容量待下一轮上报"); }
+    finally { forkLock.current = false; setForking(false); await refresh(); }
+  }
   return <>
     <section><div className="section-title"><h2>Codex Desktop 连接</h2><span className={status?.connected ? "ok-pill" : ""}>{status?.connected ? "已连接" : "未连接"}</span><button className="section-action" onClick={() => void refresh()}>刷新</button></div>
-      <p className="section-hint">自动识别运行中的 Codex/ChatGPT、PATH、常见安装目录与 Microsoft Store 安装包；探测只在进入此页或手动刷新时执行。</p>
+      <p className="section-hint">自动识别运行中的 Codex/ChatGPT、PATH、常见安装目录与 Microsoft Store 安装包；当前对话每两秒自动刷新；编辑期间保留输入，切换对话后重新读取。</p>
       <div className="field"><label>自动识别结果</label><div className="inline-form"><input readOnly value={status?.codexExecutable || "尚未识别到 Codex Desktop"} /><button onClick={() => void refresh()}>重新识别</button></div></div>
       <details className="manual-path"><summary>自动识别不正确时手动指定</summary><div className="inline-form"><input value={manualPath} onChange={event => setManualPath(event.target.value)} placeholder="Codex.exe 或 ChatGPT.exe 的完整路径" /><button disabled={!manualPath.trim()} onClick={() => void run(() => api.setCodexExecutable(manualPath.trim()), "程序路径已保存").then(refresh)}>保存</button><button onClick={() => void run(() => api.setCodexExecutable(""), "已恢复自动识别").then(refresh)}>自动</button></div></details>
       <div className="status-grid"><div><span>设置目标</span><strong>{status?.target || "读取中…"}</strong></div><div><span>CDP 端口</span><strong>{status?.debugPort || "—"}</strong></div></div>
       <div className="settings-row"><div><strong>自动恢复主题</strong><small>启动 codex-box 后恢复已应用主题</small></div><input aria-label="自动恢复主题" type="checkbox" checked={dashboard.themeState.autoReapply} onChange={event => void run(() => api.setAutoReapply(event.target.checked), "主题恢复设置已保存")} /></div>
     </section>
     <section><div className="section-title"><h2>对话运行参数</h2></div><p className="section-hint">已连接时写入当前对话；首页状态下写入新对话默认值。</p>
-      <div className="form-grid"><label>模型<input value={preset.model} onChange={event => field("model", event.target.value)} /></label><label>推理强度<select value={preset.reasoningEffort} onChange={event => field("reasoningEffort", event.target.value)}>{["none","minimal","low","medium","high","xhigh","max","ultra"].map(value => <option key={value}>{value}</option>)}</select></label><label>Service tier<select value={preset.serviceTier} onChange={event => field("serviceTier", event.target.value)}>{["auto","default","flex","priority"].map(value => <option key={value}>{value}</option>)}</select></label><label>上下文窗口<input type="number" min={16000} max={2000000} value={preset.contextWindow} onChange={event => field("contextWindow", Number(event.target.value))} /></label></div>
-      <button className="primary wide" onClick={() => void run(() => api.updateDesktopSettings(preset), "对话设置已更新")}>应用设置</button>
+      <div className="form-grid"><label>模型<input list="desktop-models" value={preset.model} onChange={event => field("model", event.target.value)} /></label><label>推理强度<select value={preset.reasoningEffort} onChange={event => field("reasoningEffort", event.target.value)}>{(preset.model === "gpt-6-astra" ? ["low","medium","high","xhigh","max"] : ["default","none","minimal","low","medium","high","xhigh","max","ultra"]).map(value => <option key={value}>{value}</option>)}</select></label><label>Service tier<select value={preset.serviceTier} onChange={event => field("serviceTier", event.target.value)}>{["unknown","default","flex","fast","ultrafast"].map(value => <option key={value} value={value} disabled={value === "unknown"}>{({unknown:"读取中",default:"标准",fast:"Fast",ultrafast:"Ultra"} as Record<string,string>)[value] ?? value}</option>)}</select></label><label>上下文窗口<input type="number" disabled={!!status?.conversationId} placeholder="待上报" min={16000} max={2000000} value={preset.contextWindow || ""} onChange={event => field("contextWindow", Number(event.target.value))} /></label></div>
+      <datalist id="desktop-models">{["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].map(model => <option key={model} value={model} />)}</datalist>
+      {preset.model === "gpt-6-astra" && <p className="section-hint">Astra：API 标准输入/缓存/输出 $10/$1/$50 每百万 tokens；输入超过 272k，输入与缓存 ×2、输出 ×1.5；Fast API ×2，ChatGPT credits ×2.5。费用为日志估算。<a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noreferrer">官方规则</a></p>}
+      <p className="section-hint">{status?.conversationId ? `实际上报：${preset.contextWindow || "待上报"}；已保存配置：${context?.configured ?? "暂无记录"}。` : windowLabel(preset.contextWindow)} 预计值依据当前模型目录，最终以 Codex 上报为准。</p>
+      {status?.conversationId && <div><label>分支上下文配置<select aria-label="分支上下文档位" value={[258000,512000,1000000,1050000].includes(branchWindow) ? branchWindow : "custom"} onChange={event => { if (event.target.value !== "custom") setBranchWindow(Number(event.target.value)); }}>{[258000,512000,1000000,1050000].map(value => <option value={value} key={value}>{windowLabel(value)}</option>)}<option value="custom">自定义配置</option></select></label><input aria-label="自定义分支上下文" type="number" min={16000} max={2000000} value={branchWindow} onChange={event => setBranchWindow(Number(event.target.value))} /><button disabled={forking || !status.connected} onClick={() => void createBranch()}>继承历史创建分支</button>{forking && <p>正在创建分支，可能需要约一分钟；仍可切换查看其他对话。</p>}</div>}
+      <button disabled={!status?.connected} className="primary wide" onClick={() => void apply()}>应用设置</button>
     </section>
   </>;
 }
@@ -225,7 +277,7 @@ export default function App() {
     {message && <div className="notice" role="status">{message}<button aria-label="关闭提示" onClick={() => setMessage(null)}>×</button></div>}
     <div className="content-stack">
       {visited.includes("overview") && <div className={`content-scroll ${tab === "overview" ? "active" : ""}`}><Overview dashboard={dashboard} loading={loading} busyId={busyId} setBusyId={setBusyId} run={run} login={login} manualFlowId={manualFlowId} confirmAction={confirmAction} updateLabel={updateLabel} onUpdateAction={handleUpdateAction} /></div>}
-      {visited.includes("desktop") && <div className={`content-scroll ${tab === "desktop" ? "active" : ""}`}><DesktopPanel dashboard={dashboard} run={run} /></div>}
+      {visited.includes("desktop") && <div className={`content-scroll ${tab === "desktop" ? "active" : ""}`}><DesktopPanel dashboard={dashboard} run={run} confirmAction={confirmAction} /></div>}
       {visited.includes("themes") && <div className={`content-scroll ${tab === "themes" ? "active" : ""}`}><ThemesPanel dashboard={dashboard} reload={load} showMessage={setMessage} confirmAction={confirmAction} /></div>}
       {visited.includes("records") && <div className={`content-scroll ${tab === "records" ? "active" : ""}`}><RecordsPanel showMessage={setMessage} /></div>}
     </div>

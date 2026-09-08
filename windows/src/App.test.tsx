@@ -5,7 +5,7 @@ import { api } from "./api";
 
 vi.mock("./api", () => ({ api: {
   dashboard: vi.fn(), startOAuth: vi.fn(), refreshUsage: vi.fn(), setActive: vi.fn(), removeAccount: vi.fn(), exportAccounts: vi.fn(), importAccounts: vi.fn(), createProfile: vi.fn(), launchProfile: vi.fn(), removeProfile: vi.fn(), startGateway: vi.fn(), stopGateway: vi.fn(), setStartAtLogin: vi.fn(), checkUpdate: vi.fn(), downloadUpdate: vi.fn(), installUpdate: vi.fn(),
-  createProvider: vi.fn(), removeProvider: vi.fn(), setActiveProvider: vi.fn(), addProviderAccount: vi.fn(), removeProviderAccount: vi.fn(), setActiveProviderAccount: vi.fn(), setAutoRoute: vi.fn(), records: vi.fn(), refreshThemes: vi.fn(), themePage: vi.fn(), setThemeSource: vi.fn(), addThemeSource: vi.fn(), installTheme: vi.fn(), installAndApplyTheme: vi.fn(), installDreamSkin: vi.fn(), installAndApplyDreamSkin: vi.fn(), importLocalTheme: vi.fn(), applyTheme: vi.fn(), revertTheme: vi.fn(), uninstallTheme: vi.fn(), setAutoReapply: vi.fn(), setCodexExecutable: vi.fn(), desktopStatus: vi.fn(), updateDesktopSettings: vi.fn(),
+  createProvider: vi.fn(), removeProvider: vi.fn(), setActiveProvider: vi.fn(), addProviderAccount: vi.fn(), removeProviderAccount: vi.fn(), setActiveProviderAccount: vi.fn(), setAutoRoute: vi.fn(), records: vi.fn(), refreshThemes: vi.fn(), themePage: vi.fn(), setThemeSource: vi.fn(), addThemeSource: vi.fn(), installTheme: vi.fn(), installAndApplyTheme: vi.fn(), installDreamSkin: vi.fn(), installAndApplyDreamSkin: vi.fn(), importLocalTheme: vi.fn(), applyTheme: vi.fn(), revertTheme: vi.fn(), uninstallTheme: vi.fn(), setAutoReapply: vi.fn(), setCodexExecutable: vi.fn(), desktopStatus: vi.fn(), updateDesktopSettings: vi.fn(), contextInfo: vi.fn(), createContextBranch: vi.fn(),
 } }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -14,6 +14,7 @@ const dashboard = { accounts: [{ id: "a1", email: "test@example.com", openaiAcco
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.contextInfo).mockResolvedValue({maximum:872000, percent:95, configured:null});
   vi.mocked(api.dashboard).mockResolvedValue(dashboard);
   vi.mocked(api.desktopStatus).mockResolvedValue({ connected: false, target: "已识别，等待换肤连接", conversationId: null, preset: { model: "gpt-5.6-sol", reasoningEffort: "medium", serviceTier: "flex", contextWindow: 272000 }, codexExecutable: "C:\\Program Files\\ChatGPT\\ChatGPT.exe", debugPort: null });
   vi.mocked(api.checkUpdate).mockResolvedValue(null);
@@ -110,3 +111,42 @@ for (const connected of [false, true]) {
     await waitFor(() => expect(api.applyTheme).toHaveBeenCalledWith("skin", !connected));
   });
 }
+
+test("切换对话会刷新字段，提交携带编辑时的目标与基线", async () => {
+  const first = {connected:true,target:"当前对话 · first",conversationId:"first",preset:{model:"model-a",reasoningEffort:"low",serviceTier:"未提供",contextWindow:258400},codexExecutable:null,debugPort:54321};
+  vi.mocked(api.desktopStatus).mockResolvedValue(first);
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", {name:"桌面"}));
+  const model = await screen.findByDisplayValue("model-a");
+  fireEvent.change(model, {target:{value:"draft"}});
+  fireEvent.click(within(screen.getByRole("heading", {name:"Codex Desktop 连接"}).closest("section")!).getByRole("button", {name:"刷新"}));
+  await waitFor(() => expect(api.desktopStatus).toHaveBeenCalledTimes(2));
+  expect(model).toHaveValue("draft");
+  const second = {...first, target:"当前对话 · second",conversationId:"second",preset:{...first.preset,model:"model-b",reasoningEffort:"high"}};
+  vi.mocked(api.desktopStatus).mockResolvedValue(second);
+  fireEvent.click(within(screen.getByRole("heading", {name:"Codex Desktop 连接"}).closest("section")!).getByRole("button", {name:"刷新"}));
+  await screen.findByDisplayValue("model-b");
+  fireEvent.change(screen.getByDisplayValue("model-b"), {target:{value:"model-c"}});
+  fireEvent.click(screen.getByRole("button", {name:"应用设置"}));
+  await waitFor(() => expect(api.updateDesktopSettings).toHaveBeenCalledWith({...second.preset,model:"model-c"}, "second", second.preset));
+});
+
+
+test("分支创建期间仍能跟随对话并标注预计窗口", async () => {
+  const base = {connected:true,target:"当前对话 · first",conversationId:"first",preset:{model:"gpt-6-astra",reasoningEffort:"medium",serviceTier:"default",contextWindow:245100},codexExecutable:null,debugPort:9000};
+  vi.mocked(api.desktopStatus).mockResolvedValue(base);
+  let release!: (id: string) => void;
+  vi.mocked(api.createContextBranch).mockImplementation(() => new Promise(resolve => {release=resolve;}));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", {name:"桌面"}));
+  await screen.findByText("当前对话 · first");
+  expect(await screen.findByRole("option", {name:"配置 1,000,000 → 预计有效 828,400（受模型上限限制）"})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name:"继承历史创建分支"}));
+  fireEvent.click(await screen.findByRole("button", {name:"确认"}));
+  await waitFor(() => expect(api.createContextBranch).toHaveBeenCalledWith("first",1000000));
+  vi.mocked(api.desktopStatus).mockResolvedValue({...base,target:"当前对话 · second",conversationId:"second"});
+  fireEvent.click(within(screen.getByText("Codex Desktop 连接").closest("section")!).getByRole("button", {name:"刷新"}));
+  await screen.findByText("当前对话 · second");
+  release("branch");
+  await screen.findByText("分支已创建，窗口配置已保存；实际容量待下一轮上报");
+});

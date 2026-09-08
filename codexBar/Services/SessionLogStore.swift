@@ -14,12 +14,14 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     enum ServiceTier: String, Codable, Equatable, Sendable {
         case standard
         case priority
+        case flex
         case unknown
 
         static func parse(_ value: String?) -> ServiceTier {
             switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "priority", "fast": .priority
-            case "standard", "flex": .standard
+            case "standard", "default": .standard
+            case "flex", "batch": .flex
             default: .unknown
             }
         }
@@ -36,6 +38,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         let inputTokens: Int
         let cachedInputTokens: Int
         let outputTokens: Int
+        var cacheWriteTokens: Int? = nil
 
         nonisolated static let zero = Usage(inputTokens: 0, cachedInputTokens: 0, outputTokens: 0)
 
@@ -53,7 +56,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
             Usage(
                 inputTokens: lhs.inputTokens + rhs.inputTokens,
                 cachedInputTokens: lhs.cachedInputTokens + rhs.cachedInputTokens,
-                outputTokens: lhs.outputTokens + rhs.outputTokens
+                outputTokens: lhs.outputTokens + rhs.outputTokens,
+                cacheWriteTokens: lhs.cacheWriteTokens == nil && rhs.cacheWriteTokens == nil ? nil : (lhs.cacheWriteTokens ?? 0) + (rhs.cacheWriteTokens ?? 0)
             )
         }
 
@@ -61,7 +65,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
             Usage(
                 inputTokens: max(self.inputTokens, other.inputTokens),
                 cachedInputTokens: max(self.cachedInputTokens, other.cachedInputTokens),
-                outputTokens: max(self.outputTokens, other.outputTokens)
+                outputTokens: max(self.outputTokens, other.outputTokens),
+                cacheWriteTokens: self.cacheWriteTokens == nil && other.cacheWriteTokens == nil ? nil : max(self.cacheWriteTokens ?? 0, other.cacheWriteTokens ?? 0)
             )
         }
 
@@ -69,7 +74,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
             Usage(
                 inputTokens: max(0, self.inputTokens - previous.inputTokens),
                 cachedInputTokens: max(0, self.cachedInputTokens - previous.cachedInputTokens),
-                outputTokens: max(0, self.outputTokens - previous.outputTokens)
+                outputTokens: max(0, self.outputTokens - previous.outputTokens),
+                cacheWriteTokens: self.cacheWriteTokens == nil && previous.cacheWriteTokens == nil ? nil : max(0, (self.cacheWriteTokens ?? 0) - (previous.cacheWriteTokens ?? 0))
             )
         }
 
@@ -301,7 +307,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     private let persistedUsageLedgerURL: URL
     private let billableCostCalculator: (String, ServiceTier, Usage, Usage) -> Double?
     private let queue = DispatchQueue(label: "lzl.codexbar.session-log-store", qos: .utility)
-    private let persistedCacheVersion = 7
+    private let persistedCacheVersion = 8
     private let persistedUsageLedgerVersion = 4
 
     private var sessionCache: [URL: CachedSessionRecord] = [:]
@@ -1908,7 +1914,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         Usage(
             inputTokens: object["input_tokens"] as? Int ?? 0,
             cachedInputTokens: object["cached_input_tokens"] as? Int ?? 0,
-            outputTokens: object["output_tokens"] as? Int ?? 0
+            outputTokens: object["output_tokens"] as? Int ?? 0,
+            cacheWriteTokens: object["cache_write_tokens"] as? Int ?? object["cache_creation_input_tokens"] as? Int
         )
     }
 

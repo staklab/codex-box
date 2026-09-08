@@ -7,6 +7,7 @@ struct CodexDesktopThreadPreset: Codable, Equatable {
     var serviceTier: String
     var contextWindow: Int
     var updatedAt: Date
+    var contextAppliedAfter: Double? = nil
 
     static let fallback = CodexDesktopThreadPreset(
         model: CodexBarGlobalSettings.defaultModelID,
@@ -28,7 +29,7 @@ private struct CodexDesktopThreadPresetFile: Codable {
 /// 安全边界：
 /// - 不启动第二个 app-server；
 /// - 不读取或写入 auth.json；
-/// - 只发送 `thread/settings/update` 与 `thread/resume`；
+/// - 使用 `thread/read` 读取和核验，使用 `thread/settings/update` 修改下一轮设置；
 /// - 首页设置只合并更新 config.toml 的四个模型键，其余内容原样保留。
 @MainActor
 final class CodexDesktopThreadSettingsService: ObservableObject {
@@ -44,16 +45,34 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
     @Published private(set) var preset: CodexDesktopThreadPreset = .fallback
     @Published private(set) var effectiveContextWindow: Int?
     @Published private(set) var isBusy = false
+    @Published private(set) var branchProgress: String?
+    private var isCreatingBranch = false
     @Published private(set) var message: String?
 
-    private let injection: CodexSkinInjectionService
+    private let evaluate: (String) async throws -> Any?
+    private let routeScript: String?
+    private let persistOverride: ((Data) throws -> Void)?
+    private let readContextWindow: (String, String, Date?) async -> Int?
     private var file: CodexDesktopThreadPresetFile
     private var refreshGeneration = 0
+    private var isRefreshing = false
 
-    init(injection: CodexSkinInjectionService = .shared) {
-        self.injection = injection
-        let defaultPreset = Self.readGlobalPreset()
-        self.file = Self.readFile() ?? CodexDesktopThreadPresetFile(
+    init(injection: CodexSkinInjectionService = .shared, evaluator: ((String) async throws -> Any?)? = nil, routeScript: String? = nil, contextReader: ((String, String, Date?) async -> Int?)? = nil, persistOverride: ((Data) throws -> Void)? = nil) {
+        self.persistOverride = persistOverride
+        self.readContextWindow = contextReader ?? { threadID, model, after in
+            let stateDBURL = CodexPaths.stateSQLiteURL
+            return await Task.detached(priority: .utility) {
+                CodexThreadContextWindowReader(stateDBURL: stateDBURL)
+                    .latestEffectiveContextWindow(threadID: threadID, model: model, after: after)
+            }.value
+        }
+        self.routeScript = routeScript
+        self.evaluate = evaluator ?? { script in
+            try await injection.evaluateDesktop(javascript: script,
+                timeout: script.contains("const timeoutMs = 60000;") ? 65 : 15)
+        }
+        let defaultPreset = evaluator == nil ? Self.readGlobalPreset() : .fallback
+        self.file = (evaluator == nil ? Self.readFile() : nil) ?? CodexDesktopThreadPresetFile(
             schemaVersion: 1,
             defaultPreset: defaultPreset,
             threads: [:]
@@ -77,36 +96,72 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
 
     /// 当前线程以 Codex 最近一次 token_count 上报的有效窗口为准；首页或尚未产生
     /// token_count 的新线程仍显示用户配置值。
+    var isThread: Bool {
+        if case .thread = self.target { return true }
+        return false
+    }
+
+    var canEdit: Bool {
+        if case .unavailable = self.target { return false }
+        return !self.isBusy
+    }
+
+    static func serviceTierLabel(_ tier: String) -> String {
+        switch tier {
+        case "priority", "fast": return "Fast"
+        case "default", "standard", "auto": return "标准"
+        case "ultrafast": return "Ultra"
+        case "unknown", "未提供": return "读取中"
+        default: return tier
+        }
+    }
+
+    var serviceTierLabel: String { Self.serviceTierLabel(self.preset.serviceTier) }
+
+    var hasContextWindowOverride: Bool {
+        guard self.file.schemaVersion >= 2, case .thread(let id) = self.target else { return false }
+        return self.file.threads[id] != nil
+    }
+
     var displayedContextWindow: Int {
         self.effectiveContextWindow ?? self.preset.contextWindow
     }
 
     func refresh() async {
+        guard (!self.isBusy || self.isCreatingBranch), !self.isRefreshing else { return }
+        self.isRefreshing = true
+        defer { self.isRefreshing = false }
         self.refreshGeneration += 1
         let generation = self.refreshGeneration
         do {
             let route = try await self.currentDesktopRoute()
             guard generation == self.refreshGeneration else { return }
             if route.routeKind == "local-thread", let threadID = route.conversationID {
-                self.target = .thread(threadID)
-                self.preset = self.file.threads[threadID] ?? Self.readGlobalPreset()
-                self.effectiveContextWindow = nil
-
-                let stateDBURL = CodexPaths.stateSQLiteURL
-                let effectiveWindow = await Task.detached(priority: .utility) {
-                    CodexThreadContextWindowReader(stateDBURL: stateDBURL)
-                        .latestEffectiveContextWindow(threadID: threadID)
-                }.value
+                var actual = try await self.readThreadPreset(threadID)
+                let cutoff = self.file.schemaVersion >= 2 ? self.file.threads[threadID]?.contextAppliedAfter : nil
+                let effectiveWindow = await self.readContextWindow(threadID, actual.model,
+                    cutoff.map { Date(timeIntervalSince1970: $0) })
+                let confirmedRoute = try await self.currentDesktopRoute()
                 guard generation == self.refreshGeneration,
-                      self.target == .thread(threadID)
-                else { return }
-                self.effectiveContextWindow = effectiveWindow
-            } else {
-                self.target = .home
-                self.preset = self.file.defaultPreset
-                self.effectiveContextWindow = nil
+                      Self.target(for: confirmedRoute) == .thread(threadID) else { return }
+                actual.serviceTier = confirmedRoute.serviceTierKnown == true
+                    ? confirmedRoute.serviceTier ?? "default" : "unknown"
+                // 所有异步读取完成后一次提交，不在轮询中途清空已有窗口。
+                actual.updatedAt = self.preset.updatedAt
+                if self.target != .thread(threadID) { self.target = .thread(threadID) }
+                if self.preset != actual { self.preset = actual }
+                if self.effectiveContextWindow != effectiveWindow { self.effectiveContextWindow = effectiveWindow }
+            } else if route.routeKind == "home" || route.routeKind == "new-thread-panel" {
+                var actual = Self.readGlobalPreset()
+                if route.serviceTierKnown == true { actual.serviceTier = route.serviceTier ?? "default" }
+                if self.target != .home { self.target = .home }
+                if self.preset != actual { self.preset = actual }
+                if self.effectiveContextWindow != nil { self.effectiveContextWindow = nil }
             }
-            self.message = nil
+            else {
+                throw CodexThemeError.downloadFailed("当前页面无法唯一识别本地对话，请打开需要控制的对话。")
+            }
+            self.message = self.target == .home ? "新对话默认配置；已打开的编辑器可能保留自己的选择。" : nil
         } catch {
             guard generation == self.refreshGeneration else { return }
             self.target = .unavailable(error.localizedDescription)
@@ -122,6 +177,9 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
         contextWindow: Int
     ) async throws {
         guard self.isBusy == false else { return }
+        let expectedTarget = self.target
+        let previous = self.preset
+        self.refreshGeneration += 1
         self.isBusy = true
         defer { self.isBusy = false }
 
@@ -133,48 +191,144 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
             updatedAt: Date()
         )
 
-        switch self.target {
+        let route = try await self.currentDesktopRoute()
+        guard Self.target(for: route) == expectedTarget else {
+            throw CodexThemeError.downloadFailed("Codex 当前对话已变化，请等待刷新后再修改。")
+        }
+        switch expectedTarget {
         case .home:
             try Self.writeGlobalPreset(next)
             self.file.defaultPreset = next
             try self.persist()
             self.preset = next
             self.effectiveContextWindow = nil
-            self.message = "已更新新对话默认值；无需重启。"
+            self.message = "已保存新对话默认值；已打开的编辑器可能保留自己的选择。"
 
         case .thread(let threadID):
-            _ = try await self.sendDesktopRequest(
-                method: "thread/settings/update",
-                params: [
-                    "threadId": threadID,
-                    "model": model,
-                    "effort": reasoningEffort,
-                    "serviceTier": serviceTier,
-                ]
-            )
-            _ = try await self.sendDesktopRequest(
-                method: "thread/resume",
-                params: [
-                    "threadId": threadID,
-                    "excludeTurns": true,
-                    "model": model,
-                    "serviceTier": serviceTier,
-                    "config": [
-                        "model_context_window": contextWindow,
-                        "model_reasoning_effort": reasoningEffort,
-                    ],
-                ]
-            )
-            self.file.threads[threadID] = next
-            try self.persist()
-            self.preset = next
-            // 新配置会在下一轮消息产生新的 token_count 后被重新识别。
-            self.effectiveContextWindow = nil
-            self.message = "已应用到当前对话；下一轮消息生效，无需重启。"
+            guard contextWindow == previous.contextWindow else {
+                throw CodexThemeError.downloadFailed("Codex 当前协议不支持修改已加载对话的上下文窗口；这里显示最近实际窗口。可在首页设置新对话默认值。")
+            }
+            // 只写用户修改的字段，避免用菜单旧快照覆盖 Codex 中刚修改的其它设置。
+            var params: [String: Any] = ["threadId": threadID]
+            if model != previous.model { params["model"] = model }
+            if reasoningEffort != previous.reasoningEffort {
+                guard reasoningEffort != "default" else {
+                    throw CodexThemeError.downloadFailed("请明确选择思考强度；当前协议的空值会保留原设置。")
+                }
+                params["effort"] = reasoningEffort
+            }
+            if serviceTier != previous.serviceTier { params["serviceTier"] = serviceTier }
+            guard params.count > 1 else { return }
+            _ = try await self.sendDesktopRequest(method: "thread/settings/update", params: params)
+            let actual = try await self.readThreadPreset(threadID)
+            guard (params["model"] == nil || actual.model == model),
+                  (params["effort"] == nil || actual.reasoningEffort == reasoningEffort) else {
+                throw CodexThemeError.downloadFailed("Codex 返回的设置与请求不一致，请刷新后重试。")
+            }
+            let confirmedRoute = try await self.currentDesktopRoute()
+            guard Self.target(for: confirmedRoute) == expectedTarget else {
+                throw CodexThemeError.downloadFailed("设置已发送到原对话，但当前页面已切换，请刷新查看。")
+            }
+            var confirmed = actual
+            confirmed.serviceTier = confirmedRoute.serviceTierKnown == true
+                ? confirmedRoute.serviceTier ?? "default" : "unknown"
+            if params["serviceTier"] != nil {
+                guard Self.serviceTierLabel(confirmed.serviceTier) == Self.serviceTierLabel(serviceTier) else {
+                    throw CodexThemeError.downloadFailed("Codex 尚未确认速度模式，请刷新后查看。")
+                }
+            }
+            if self.preset.model != confirmed.model { self.effectiveContextWindow = nil }
+            self.preset = confirmed
+            self.message = "Codex 已确认模型与思考强度；下一轮消息使用当前设置。"
 
         case .unavailable(let reason):
             throw CodexThemeError.downloadFailed(reason)
         }
+    }
+
+    /// 通过官方 fork 接口继承历史，在新的运行上下文中应用窗口配置。
+    /// 调用前由界面明确确认创建分支；不修改原对话或全局配置。
+    func createContextWindowBranch(_ window: Int, expectedTarget: Target) async throws {
+        guard !self.isBusy else { return }
+        guard (16_000...2_000_000).contains(window), case .thread(let sourceID) = expectedTarget else {
+            throw CodexThemeError.downloadFailed("请选择有效窗口和本地对话")
+        }
+        self.isBusy = true
+        self.isCreatingBranch = true
+        self.branchProgress = "正在检查分支条件…"
+        self.refreshGeneration += 1
+        defer { self.isBusy = false; self.isCreatingBranch = false; self.branchProgress = nil }
+        guard Self.target(for: try await self.currentDesktopRoute()) == expectedTarget else {
+            throw CodexThemeError.downloadFailed("当前对话已变化，请重新选择窗口")
+        }
+        let source = try await self.sendDesktopRequest(method: "thread/read",
+            params: ["threadId": sourceID, "includeTurns": false])
+        guard let thread = source["thread"] as? [String: Any], thread["id"] as? String == sourceID,
+              let status = thread["status"] as? [String: Any], status["type"] as? String == "idle" else {
+            throw CodexThemeError.downloadFailed("请等待当前对话生成完成后再调整窗口")
+        }
+        guard Self.target(for: try await self.currentDesktopRoute()) == expectedTarget else {
+            throw CodexThemeError.downloadFailed("当前对话已变化，请重新选择窗口")
+        }
+        self.branchProgress = "正在创建分支，可能需要约一分钟；可切换查看其他对话。"
+        let result = try await self.sendDesktopRequest(method: "thread/fork", params: [
+            "threadId": sourceID, "excludeTurns": true, "config": ["model_context_window": window]
+        ])
+        guard let created = result["thread"] as? [String: Any],
+              let id = created["id"] as? String, UUID(uuidString: id) != nil, id != sourceID else {
+            throw CodexThemeError.downloadFailed("Codex 未返回有效的新分支")
+        }
+        // 收到创建成功响应后立即保存配置，不让后续读取或导航失败丢失记录。
+        let now = Date()
+        let next = CodexDesktopThreadPreset(
+            model: result["model"] as? String ?? thread["model"] as? String ?? self.preset.model,
+            reasoningEffort: result["reasoningEffort"] as? String ?? thread["reasoningEffort"] as? String ?? "default",
+            serviceTier: "unknown", contextWindow: window, updatedAt: now,
+            contextAppliedAfter: now.timeIntervalSince1970)
+        self.branchProgress = "分支已创建，正在保存窗口配置…"
+        // 旧版本缓存曾记录未经验证的设置，不能当成新分支配置。
+        if self.file.schemaVersion < 2 { self.file.threads = [:]; self.file.schemaVersion = 2 }
+        self.file.threads[id] = next
+        do { try self.persist() } catch {
+            throw CodexThemeError.downloadFailed("分支已创建（\(id)），但保存窗口记录失败：\(error.localizedDescription)")
+        }
+        guard Self.target(for: try await self.currentDesktopRoute()) == expectedTarget else {
+            throw CodexThemeError.downloadFailed("分支已创建（\(id)），当前页面已变化，请从 Codex 会话列表打开")
+        }
+        let pathData = try JSONSerialization.data(withJSONObject: ["path": "/local/" + id])
+        let encoded = pathData.base64EncodedString()
+        _ = try await self.evaluate("""
+        (() => { const route = JSON.parse(atob('\(encoded)'));
+          window.postMessage({type:'navigate-to-route',path:route.path}, '*'); return true; })()
+        """)
+        // 导航后交还普通轮询；不占用写入锁等待页面挂载。
+        self.message = "分支已创建，配置窗口 \(window)；实际可用窗口待下一轮上报。"
+    }
+
+    private func readThreadPreset(_ threadID: String) async throws -> CodexDesktopThreadPreset {
+        let result = try await self.sendDesktopRequest(
+            method: "thread/read", params: ["threadId": threadID, "includeTurns": false]
+        )
+        guard let thread = result["thread"] as? [String: Any],
+              thread["id"] as? String == threadID,
+              let model = thread["model"] as? String, !model.isEmpty else {
+            throw CodexThemeError.downloadFailed("Codex 未返回当前对话的真实模型设置")
+        }
+        return CodexDesktopThreadPreset(
+            model: model,
+            reasoningEffort: thread["reasoningEffort"] as? String ?? "default",
+            serviceTier: "unknown",
+            contextWindow: self.file.schemaVersion >= 2 ? self.file.threads[threadID]?.contextWindow
+                ?? CodexBarGlobalSettings.defaultContextWindow(for: model)
+                : CodexBarGlobalSettings.defaultContextWindow(for: model),
+            updatedAt: Date()
+        )
+    }
+
+    private static func target(for route: DesktopRoute) -> Target {
+        if route.routeKind == "local-thread", let id = route.conversationID { return .thread(id) }
+        if route.routeKind == "home" || route.routeKind == "new-thread-panel" { return .home }
+        return .unavailable("无法识别当前页面")
     }
 
     // MARK: - 桌面桥接
@@ -182,44 +336,21 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
     private struct DesktopRoute: Decodable {
         let routeKind: String
         let conversationID: String?
+        let serviceTierKnown: Bool?
+        let serviceTier: String?
     }
 
     private func currentDesktopRoute() async throws -> DesktopRoute {
-        let script = #"""
-        (() => {
-          const root = window.__codexRoot?._internalRoot?.current;
-          if (!root) return JSON.stringify({routeKind:'unavailable',conversationID:null});
-          const routes = [];
-          const seenFibers = new Set(), seenObjects = new WeakSet(), stack = [root];
-          const scan = (value, depth = 0) => {
-            if (depth > 5 || value == null || typeof value !== 'object' || seenObjects.has(value)) return;
-            seenObjects.add(value);
-            try {
-              if (typeof value.routeKind === 'string') {
-                routes.push({routeKind:value.routeKind,conversationID:typeof value.conversationId==='string'?value.conversationId:null});
-              }
-              for (const key of Object.keys(value).slice(0,100)) {
-                if (/children|return|child|sibling|stateNode|alternate|_owner/i.test(key)) continue;
-                scan(value[key], depth + 1);
-              }
-            } catch (_) {}
-          };
-          let count = 0;
-          while (stack.length && count < 50000) {
-            const fiber = stack.pop();
-            if (!fiber || seenFibers.has(fiber)) continue;
-            seenFibers.add(fiber); count++;
-            scan(fiber.memoizedProps); scan(fiber.pendingProps); scan(fiber.memoizedState);
-            if (fiber.child) stack.push(fiber.child);
-            if (fiber.sibling) stack.push(fiber.sibling);
-          }
-          const active = routes.find(route => route.routeKind === 'local-thread' && route.conversationID);
-          if (active) return JSON.stringify(active);
-          const home = routes.find(route => route.routeKind === 'home' || route.routeKind === 'new-thread-panel');
-          return JSON.stringify(home ?? {routeKind:'unavailable',conversationID:null});
-        })()
-        """#
-        guard let value = try await self.injection.evaluateDesktop(javascript: script) as? String,
+        let script: String
+        if let routeScript = self.routeScript {
+            script = routeScript
+        } else {
+            guard let url = Bundle.main.url(forResource: "desktop-thread-route", withExtension: "js") else {
+                throw CodexThemeError.downloadFailed("会话识别脚本缺失")
+            }
+            script = try String(contentsOf: url, encoding: .utf8)
+        }
+        guard let value = try await self.evaluate(script) as? String,
               let data = value.data(using: .utf8) else {
             throw CodexThemeError.downloadFailed("无法识别 Codex 当前对话")
         }
@@ -234,6 +365,7 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
         (() => new Promise((resolve) => {
           const payload = JSON.parse(atob('\#(encoded)'));
           const requestId = `codex-box-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const timeoutMs = \#(method == "thread/fork" ? 60000 : 10000);
           let finished = false;
           const finish = (value) => {
             if (finished) return;
@@ -247,18 +379,25 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
             const response = envelope?.message ?? envelope?.response;
             if (envelope?.type !== 'mcp-response' || String(response?.id) !== requestId) return;
             if (response.error) finish({ok:false,error:response.error});
-            else finish({ok:true,result:response.result ?? {}});
+            else {
+              let result = response.result ?? {};
+              if (payload.method === 'thread/fork') {
+                // fork 携带全部历史；这里只传回配置元数据，避免大对话序列化阻塞页面。
+                result = {thread:{id:result.thread?.id},model:result.model,reasoningEffort:result.reasoningEffort};
+              }
+              finish({ok:true,result});
+            }
           };
-          const timer = setTimeout(() => finish({ok:false,error:{message:'Codex 桌面请求超时'}}), 12000);
+          const timer = setTimeout(() => finish({ok:false,error:{message:'Codex 桌面请求超时'}}), timeoutMs + 2000);
           window.addEventListener('message', listener);
           window.electronBridge.sendMessageFromView({
-            type:'mcp-request',hostId:'local',priority:'critical',source:'thread',timeoutMs:10000,
-            expiresAtMs:Date.now()+10000,
+            type:'mcp-request',hostId:'local',priority:'critical',source:'thread',timeoutMs,
+            expiresAtMs:Date.now()+timeoutMs,
             request:{id:requestId,method:payload.method,params:payload.params}
           }).catch(error => finish({ok:false,error:{message:String(error)}}));
         }))()
         """#
-        guard let value = try await self.injection.evaluateDesktop(javascript: script) as? String,
+        guard let value = try await self.evaluate(script) as? String,
               let data = value.data(using: .utf8),
               let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { throw CodexThemeError.downloadFailed("Codex 桌面返回格式无效") }
@@ -279,12 +418,14 @@ final class CodexDesktopThreadSettingsService: ObservableObject {
     }
 
     private func persist() throws {
-        try CodexPaths.ensureDirectories()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(self.file)
+        if let persistOverride { try persistOverride(data); return }
+        try CodexPaths.ensureDirectories()
         try CodexPaths.writeSecureFile(
-            try encoder.encode(self.file),
+            data,
             to: CodexPaths.desktopThreadPresetsURL
         )
     }

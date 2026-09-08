@@ -918,12 +918,38 @@ async fn get_desktop_status(
 }
 
 #[tauri::command]
+async fn get_context_info(model: String, conversation_id: Option<String>) -> Result<serde_json::Value, String> {
+    desktop::context_info(&model, conversation_id.as_deref()).map_err(error_message)
+}
+
+#[tauri::command]
+async fn create_context_branch(context: tauri::State<'_, Arc<AppContext>>, conversation_id: String, window: u64) -> Result<String, String> {
+    let (state, preset) = {
+        let store = context.store.lock().map_err(error_message)?;
+        (store.theme_state(), store.config().thread_preset.clone())
+    };
+    let status = desktop::desktop_status(&state, preset).await;
+    if !status.connected || status.conversation_id.as_deref() != Some(&conversation_id) {
+        return Err("当前对话已变化或连接不可用".into());
+    }
+    desktop::create_context_branch(status.debug_port.ok_or("调试连接不可用")?, &conversation_id, window).await.map_err(error_message)
+}
+
+#[tauri::command]
 async fn update_desktop_settings(
+    previous: ThreadPreset,
+    conversation_id: Option<String>,
     context: tauri::State<'_, Arc<AppContext>>,
     preset: ThreadPreset,
 ) -> Result<(), String> {
     let state = context.store.lock().map_err(error_message)?.theme_state();
     let status = desktop::desktop_status(&state, preset.clone()).await;
+    if !status.connected || status.conversation_id != conversation_id {
+        return Err("当前对话已变化或连接不可用，请刷新后再修改".into());
+    }
+    if status.preset.model != previous.model || status.preset.reasoning_effort != previous.reasoning_effort {
+        return Err("Codex 中的设置已变化，请刷新后重新选择".into());
+    }
     desktop::update_thread_settings(
         status.debug_port,
         status.conversation_id.as_deref(),
@@ -1268,7 +1294,9 @@ pub fn run() {
             set_auto_reapply,
             set_codex_executable,
             get_desktop_status,
-            update_desktop_settings
+            update_desktop_settings,
+            get_context_info,
+            create_context_branch
         ])
         .run(tauri::generate_context!())
         .expect("codex-box Windows 运行失败");

@@ -41,6 +41,8 @@ export const api = {
   uninstallTheme: (themeId: string) => invoke<void>("uninstall_theme", { themeId }),
   setAutoReapply: (enabled: boolean) => invoke<void>("set_auto_reapply", { enabled }),
   setCodexExecutable: (path: string) => invoke<void>("set_codex_executable", { path }),
+  contextInfo: (model: string, conversationId: string | null) => invoke<{maximum: number | null; percent: number | null; configured: number | null}>("get_context_info", {model, conversationId}),
+  createContextBranch: (conversationId: string, window: number) => invoke<string>("create_context_branch", {conversationId, window}),
   desktopStatus: () => invoke<DesktopStatus>("get_desktop_status"),
-  updateDesktopSettings: (preset: ThreadPreset) => invoke<void>("update_desktop_settings", { preset }),
+  updateDesktopSettings: (preset: ThreadPreset, conversationId: string | null, previous: ThreadPreset) => invoke<void>("update_desktop_settings", { preset, conversationId, previous }),
 };

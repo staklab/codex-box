@@ -5,6 +5,7 @@ enum LocalCostPricing {
     private static let longContextPremiumBaseModels = ["gpt-5.4", "gpt-5.5", "gpt-5.6"]
 
     private static let defaultPricingByModel: [String: CodexBarModelPricing] = [
+        "gpt-6-astra": CodexBarModelPricing(inputUSDPerToken: 10e-6, cachedInputUSDPerToken: 1e-6, outputUSDPerToken: 50e-6),
         "gpt-5": CodexBarModelPricing(inputUSDPerToken: 1.25e-6, cachedInputUSDPerToken: 1.25e-7, outputUSDPerToken: 1e-5),
         "gpt-5-codex": CodexBarModelPricing(inputUSDPerToken: 1.25e-6, cachedInputUSDPerToken: 1.25e-7, outputUSDPerToken: 1e-5),
         "gpt-5-pro": CodexBarModelPricing(inputUSDPerToken: 1.5e-5, cachedInputUSDPerToken: 1.5e-5, outputUSDPerToken: 1.2e-4),
@@ -74,6 +75,15 @@ enum LocalCostPricing {
             ?? customPricingByModel.first(where: {
                 self.normalizedModelID($0.key) == normalizedModel
             })?.value
+        if normalizedModel == "gpt-6-astra", customPricing == nil {
+            let write = min(max(0, usage.cacheWriteTokens ?? 0), billableInput)
+            let long = input > self.longContextInputThreshold
+            let tier: Double = serviceTier == .priority ? 2 : serviceTier == .flex ? 0.5 : 1
+            return (Double(billableInput - write) * 10e-6 * (long ? 2 : 1)
+                + Double(cached) * 1e-6 * (long ? 2 : 1)
+                + Double(write) * 12.5e-6 * (long ? 2 : 1)
+                + Double(max(0, usage.outputTokens)) * 50e-6 * (long ? 1.5 : 1)) * tier
+        }
         let priorityPricing = self.priorityPricing(
             for: normalizedModel,
             serviceTier: serviceTier,

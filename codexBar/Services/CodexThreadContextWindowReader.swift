@@ -19,11 +19,11 @@ struct CodexThreadContextWindowReader: Sendable {
         self.maximumTailBytes = maximumTailBytes
     }
 
-    nonisolated func latestEffectiveContextWindow(threadID: String) -> Int? {
+    nonisolated func latestEffectiveContextWindow(threadID: String, model: String? = nil, after: Date? = nil) -> Int? {
         guard let rolloutPath = self.rolloutPath(threadID: threadID) else { return nil }
         return Self.latestEffectiveContextWindow(
             inRolloutAt: URL(fileURLWithPath: rolloutPath),
-            maximumTailBytes: self.maximumTailBytes
+            maximumTailBytes: self.maximumTailBytes, model: model, after: after
         )
     }
 
@@ -65,7 +65,7 @@ struct CodexThreadContextWindowReader: Sendable {
 
     private nonisolated static func latestEffectiveContextWindow(
         inRolloutAt url: URL,
-        maximumTailBytes: UInt64
+        maximumTailBytes: UInt64, model: String?, after: Date?
     ) -> Int? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
@@ -75,14 +75,28 @@ struct CodexThreadContextWindowReader: Sendable {
         do {
             try handle.seek(toOffset: startOffset)
             guard let data = try handle.readToEnd() else { return nil }
-            return Self.latestEffectiveContextWindow(inRolloutTail: data)
+            return Self.latestEffectiveContextWindow(inRolloutTail: data, model: model, after: after)
         } catch {
             return nil
         }
     }
 
-    nonisolated static func latestEffectiveContextWindow(inRolloutTail data: Data) -> Int? {
+    nonisolated static func latestEffectiveContextWindow(inRolloutTail data: Data, model: String? = nil, after: Date? = nil) -> Int? {
+        var candidate: Int?
+        let timestampParser = ISO8601DateFormatter()
+        timestampParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for line in data.split(separator: 0x0A).reversed() {
+            if let after {
+                guard line.contains(Self.tokenCountNeedle) || line.contains(Data("\"turn_context\"".utf8)) else { continue }
+                guard let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                      let stamp = event["timestamp"] as? String,
+                      let date = timestampParser.date(from: stamp), date > after else { continue }
+            }
+            if let model, let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+               event["type"] as? String == "turn_context" {
+                let payload = event["payload"] as? [String: Any]
+                return payload?["model"] as? String == model ? candidate : nil
+            }
             guard line.contains(Self.tokenCountNeedle),
                   line.contains(Self.contextWindowNeedle),
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
@@ -93,7 +107,8 @@ struct CodexThreadContextWindowReader: Sendable {
                   let contextWindow = info["model_context_window"] as? Int,
                   contextWindow > 0
             else { continue }
-            return contextWindow
+            if model == nil { return contextWindow }
+            if candidate == nil { candidate = contextWindow }
         }
         return nil
     }

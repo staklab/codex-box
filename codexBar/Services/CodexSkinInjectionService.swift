@@ -172,19 +172,65 @@ final class CodexSkinInjectionService: ObservableObject {
     /// 返回 Codex 桌面主渲染页。线程控制与皮肤共用同一个受控 CDP 连接，
     /// 不另启 app-server，也不接触认证文件。
     func mainPageTarget() async throws -> CDPTarget {
-        if self.debugPort == nil {
-            self.debugPort = Self.discoverRunningDebugPort()
+        for attempt in 0..<2 {
+            if self.debugPort == nil { self.debugPort = Self.discoverRunningDebugPort() }
+            guard let port = self.debugPort else {
+                throw CodexThemeError.downloadFailed("Codex 未开放可用调试连接")
+            }
+            let targets: [CDPTarget]
+            do {
+                targets = try await self.pageTargets(port: port)
+            } catch {
+                self.debugPort = nil
+                UserDefaults.standard.removeObject(forKey: Self.persistedDebugPortKey)
+                if attempt == 1 { throw error }
+                continue
+            }
+            let main = targets.filter(Self.isMainPageTarget)
+            var observations: [(target: CDPTarget, focused: Bool, lastFocus: Double)] = []
+            for target in main {
+                guard let url = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
+                let value = try? await self.evaluate(javascript: Self.windowFocusScript,
+                    webSocketURL: url, awaitPromise: false, timeout: 2)
+                let state = value as? [String: Any]
+                observations.append((target, state?["focused"] as? Bool ?? false,
+                    state?["lastFocus"] as? Double ?? 0))
+            }
+            if main.count == 1, let target = main.first { return target }
+            if let index = Self.activeWindowIndex(observations.map { ($0.focused, $0.lastFocus) }) {
+                return observations[index].target
+            }
+            throw CodexThemeError.downloadFailed("请先点击需要控制的 Codex 窗口，再打开 codex-box。")
         }
-        guard let port = self.debugPort else {
-            throw CodexThemeError.downloadFailed("Codex 未通过 codex-box 调试端口启动")
-        }
-        let targets = try await self.pageTargets(port: port)
-        guard let target = targets.first(where: {
-            $0.url == "app://-/index.html" || $0.url.hasSuffix("/index.html")
-        }) ?? targets.first else {
-            throw CodexThemeError.downloadFailed("找不到 Codex 桌面主窗口")
-        }
-        return target
+        throw CodexThemeError.downloadFailed("Codex 调试连接不可用")
+    }
+
+    static func isMainPageTarget(_ target: CDPTarget) -> Bool {
+        guard target.type == "page", let url = URLComponents(string: target.url) else { return false }
+        return url.scheme == "app" && url.host == "-" && url.path == "/index.html"
+    }
+
+    // 菜单弹出时 Codex 会失去焦点，因此记录最后一次真正获得焦点的窗口。
+    // 记录存在各自页面内，关闭或重新加载页面后自动失效。
+    static let windowFocusScript = """
+    (() => {
+      if (!window.__codexBoxWindowFocus) {
+        const state = {lastFocus: 0};
+        window.__codexBoxWindowFocus = state;
+        window.addEventListener('focus', () => { state.lastFocus = Date.now(); });
+      }
+      const focused = document.hasFocus();
+      if (focused) window.__codexBoxWindowFocus.lastFocus = Date.now();
+      return {focused, lastFocus: window.__codexBoxWindowFocus.lastFocus};
+    })()
+    """
+
+    static func activeWindowIndex(_ states: [(focused: Bool, lastFocus: Double)]) -> Int? {
+        let focused = states.indices.filter { states[$0].focused }
+        if focused.count == 1 { return focused[0] }
+        guard focused.isEmpty, let latest = states.map(\.lastFocus).max(), latest > 0 else { return nil }
+        let matches = states.indices.filter { states[$0].lastFocus == latest }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     /// 从正在监听的 ChatGPT/Codex 进程发现调试端口。
@@ -195,14 +241,15 @@ final class CodexSkinInjectionService: ObservableObject {
         process.arguments = ["-nP", "-iTCP", "-sTCP:LISTEN"]
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
+        let data: Data
         do {
             try process.run()
+            data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
         } catch {
             return nil
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         for line in text.components(separatedBy: .newlines) where line.hasPrefix("ChatGPT") {
             guard let range = line.range(of: #"127\.0\.0\.1:(\d+) \(LISTEN\)"#, options: .regularExpression) else {
@@ -218,7 +265,7 @@ final class CodexSkinInjectionService: ObservableObject {
         return nil
     }
 
-    func evaluateDesktop(javascript: String, awaitPromise: Bool = true) async throws -> Any? {
+    func evaluateDesktop(javascript: String, awaitPromise: Bool = true, timeout: TimeInterval = 15) async throws -> Any? {
         let target = try await self.mainPageTarget()
         guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else {
             throw CodexThemeError.downloadFailed("Codex 调试目标缺少 WebSocket 地址")
@@ -226,7 +273,8 @@ final class CodexSkinInjectionService: ObservableObject {
         return try await self.evaluate(
             javascript: javascript,
             webSocketURL: wsURL,
-            awaitPromise: awaitPromise
+            awaitPromise: awaitPromise,
+            timeout: timeout
         )
     }
 
@@ -253,7 +301,7 @@ final class CodexSkinInjectionService: ObservableObject {
         let css = try self.buildCSS(themeID: themeID, definition: definition, themeService: themeService)
 
         let targets = try await self.pageTargets(port: port)
-        for target in targets where target.url == "app://-/index.html" || target.url.hasSuffix("/index.html") {
+        for target in targets where Self.isMainPageTarget(target) {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
             _ = try await self.evaluate(
                 javascript: Self.installerJS(css: css),
@@ -430,11 +478,6 @@ final class CodexSkinInjectionService: ObservableObject {
         .electron-light .app-shell-left-panel {
           text-shadow: none !important;
         }
-        .electron-light .text-size-chat {
-          background: rgba(248, 250, 249, 0.56) !important;
-          border-radius: 12px;
-          box-shadow: 0 0 0 8px rgba(248, 250, 249, 0.56);
-        }
         .electron-light [class*="_ComposerLayoutRoot_"] {
           background: rgba(248, 250, 249, 0.76) !important;
         }
@@ -533,18 +576,24 @@ final class CodexSkinInjectionService: ObservableObject {
 
     // MARK: - 最小 CDP 客户端
 
-    /// 通过 WebSocket 发一条 `Runtime.evaluate`。只发不收业务数据，收到首个响应即断开。
-    private func evaluate(
+    /// 原生截止时间不依赖页面 JS 定时器；导航、挂起或无响应都能释放调用者。
+    func evaluate(
         javascript: String,
         webSocketURL: URL,
-        awaitPromise: Bool
+        awaitPromise: Bool,
+        timeout: TimeInterval = 15
     ) async throws -> Any? {
         let task = self.session.webSocketTask(with: webSocketURL)
         // 壁纸以 data URI 内联，一张 3MB 的图转 base64 后约 4MB，
         // 而 maximumMessageSize 默认只有 1MiB，不放宽的话整条消息会被直接丢弃。
         task.maximumMessageSize = 64 * 1024 * 1024
         task.resume()
-        defer { task.cancel(with: .normalClosure, reason: nil) }
+        let deadline = DispatchWorkItem { task.cancel(with: .goingAway, reason: nil) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
+        defer {
+            deadline.cancel()
+            task.cancel(with: .normalClosure, reason: nil)
+        }
 
         let payload: [String: Any] = [
             "id": 1,
@@ -558,12 +607,23 @@ final class CodexSkinInjectionService: ObservableObject {
         let data = try JSONSerialization.data(withJSONObject: payload)
         guard let text = String(data: data, encoding: .utf8) else { return nil }
 
-        try await task.send(.string(text))
-        let message = try await task.receive()
-        guard case let .string(responseText) = message,
-              let responseData = responseText.data(using: .utf8),
-              let response = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
-        else { return nil }
+        let response: [String: Any] = try await withTaskCancellationHandler {
+            try await task.send(.string(text))
+            while true {
+                let message = try await task.receive()
+                let data: Data
+                switch message {
+                case .string(let text): data = Data(text.utf8)
+                case .data(let bytes): data = bytes
+                @unknown default: continue
+                }
+                guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      value["id"] as? Int == 1 else { continue }
+                return value
+            }
+        } onCancel: {
+            task.cancel(with: .goingAway, reason: nil)
+        }
 
         if let error = response["error"] as? [String: Any] {
             throw CodexThemeError.downloadFailed(error["message"] as? String ?? "CDP 执行失败")

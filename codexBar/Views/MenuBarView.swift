@@ -552,6 +552,7 @@ struct MenuBarView: View {
     private let codexAppPathPanelService = CodexAppPathPanelService.shared
     private let codexDesktopLaunchProbeService = CodexDesktopLaunchProbeService()
     private let codexModelOptions = [
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -580,7 +581,7 @@ struct MenuBarView: View {
     @State private var runningThreadTimerConnection: Cancellable?
     @State private var runningThreadRefreshController = CoalescedBackgroundRefreshController<OpenAIRunningThreadAttribution>()
 
-    private let countdownTimer = Timer.publish(every: 10, on: .main, in: .common)
+    private let countdownTimer = Timer.publish(every: 2, on: .main, in: .common)
     private let runningThreadTimer = Timer.publish(
         every: OpenAIRunningThreadAttributionService.defaultRecentActivityWindow,
         on: .main,
@@ -701,6 +702,7 @@ struct MenuBarView: View {
         .frame(width: MenuBarStatusItemIdentity.popoverContentWidth)
         .onReceive(countdownTimer) { _ in
             now = Date()
+            Task { await self.desktopThreadSettings.refresh() }
         }
         .onReceive(runningThreadTimer) { _ in
             refreshRunningThreadAttribution()
@@ -954,9 +956,10 @@ struct MenuBarView: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 4) {
                 self.compactSelectionMenu(
                     title: currentModel,
+                    labelWidth: 98,
                     options: self.modelSelectionOptions(currentModel: currentModel),
                     currentValue: currentModel
                 ) { modelID in
@@ -965,6 +968,7 @@ struct MenuBarView: View {
 
                 self.compactSelectionMenu(
                     title: self.desktopThreadSettings.preset.reasoningEffort,
+                    labelWidth: 54,
                     options: CodexBarGlobalSettings.reasoningEffortOptions(
                         for: currentModel,
                         currentValue: self.desktopThreadSettings.preset.reasoningEffort
@@ -975,19 +979,25 @@ struct MenuBarView: View {
                 }
 
                 self.compactSelectionMenu(
-                    title: self.desktopThreadSettings.preset.serviceTier,
+                    title: self.desktopThreadSettings.serviceTierLabel,
+                    labelWidth: 48,
                     options: self.serviceTierOptions,
-                    currentValue: self.desktopThreadSettings.preset.serviceTier
+                    currentValue: self.desktopThreadSettings.preset.serviceTier == "priority"
+                        ? "fast" : self.desktopThreadSettings.preset.serviceTier
                 ) { serviceTier in
                     Task { await self.updateSelectedServiceTier(serviceTier) }
                 }
+                .help("读取当前 Codex 编辑器的速度模式；Fast 表示快速模式，标准表示默认速度。")
 
                 self.contextWindowMenu(currentModel: currentModel)
-
-                Spacer(minLength: 0)
             }
+            .disabled(!self.desktopThreadSettings.canEdit)
 
-            if let message = self.desktopThreadSettings.message {
+            if currentModel == "gpt-6-astra" {
+                Text("Astra：API 标准输入/缓存/输出 $10/$1/$50 每百万 tokens；Fast API ×2、ChatGPT 额度 ×2.5。输入超过 272k 有长上下文加价。费用为估算。")
+                    .font(.system(size: 9)).foregroundColor(.secondary)
+            }
+            if let message = self.desktopThreadSettings.branchProgress ?? self.desktopThreadSettings.message {
                 Text(message)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
@@ -998,14 +1008,21 @@ struct MenuBarView: View {
 
     private func contextWindowMenu(currentModel: String) -> some View {
         let currentWindow = self.desktopThreadSettings.displayedContextWindow
+        let limits = CodexModelContextLimits.read(model: currentModel)
         return Menu {
+            if let actual = self.desktopThreadSettings.effectiveContextWindow {
+                Text("当前实际上报：\(self.formatContextWindow(actual))")
+            }
+            Text("档位为请求配置；预计有效值按当前模型目录计算")
+            Divider()
             ForEach(self.contextWindowPresetOptions, id: \.self) { window in
                 Button {
                     self.requestContextWindowUpdate(window, for: currentModel)
                 } label: {
                     HStack {
-                        Text(self.formatContextWindow(window))
-                        if window == currentWindow {
+                        Text(self.contextWindowChoiceLabel(window, limits: limits))
+                        if (!self.desktopThreadSettings.isThread || self.desktopThreadSettings.hasContextWindowOverride)
+                            && window == self.desktopThreadSettings.preset.contextWindow {
                             Image(systemName: "checkmark")
                         }
                     }
@@ -1022,16 +1039,31 @@ struct MenuBarView: View {
                 Task { await self.updateSelectedContextWindow(nil, for: currentModel) }
             }
         } label: {
-            self.compactMenuLabel(title: self.formatContextWindow(currentWindow))
+            self.compactMenuLabel(title: self.desktopThreadSettings.isThread
+                ? self.desktopThreadSettings.effectiveContextWindow.map { self.formatContextWindow($0) }
+                    ?? (self.desktopThreadSettings.hasContextWindowOverride ? self.formatContextWindow(currentWindow) + "*" : "待上报")
+                : self.formatContextWindow(currentWindow), width: 54)
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .fixedSize(horizontal: false, vertical: true)
-        .help(L.contextWindowMenuHelp(currentModel))
+        .help(self.desktopThreadSettings.isThread
+            ? "显示最近实际窗口；星号为请求配置值，尚未上报。菜单标注按当前模型上限及有效比例估算的容量，最终以 Codex 上报为准。"
+            : L.contextWindowMenuHelp(currentModel))
+    }
+
+    private func contextWindowChoiceLabel(_ window: Int, limits: CodexModelContextLimits?) -> String {
+        let configured = self.formatContextWindow(window)
+        guard let effective = limits?.estimatedWindow(configured: window) else {
+            return "配置 \(configured) · 有效值待上报"
+        }
+        let suffix = window > (limits?.maximum ?? window) ? "（受模型上限限制）" : ""
+        return "配置 \(configured) → 预计有效 \(self.formatContextWindow(effective))\(suffix)"
     }
 
     private func compactSelectionMenu(
         title: String,
+        labelWidth: CGFloat? = nil,
         options: [String],
         currentValue: String,
         onSelect: @escaping (String) -> Void
@@ -1050,14 +1082,14 @@ struct MenuBarView: View {
                 }
             }
         } label: {
-            self.compactMenuLabel(title: title)
+            self.compactMenuLabel(title: title, width: labelWidth)
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func compactMenuLabel(title: String) -> some View {
+    private func compactMenuLabel(title: String, width: CGFloat? = nil) -> some View {
         HStack(spacing: 0) {
             Text(title)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -1067,6 +1099,7 @@ struct MenuBarView: View {
         .foregroundColor(.primary.opacity(0.86))
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
+        .frame(width: width)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(Color.primary.opacity(0.07))
@@ -1668,7 +1701,7 @@ struct MenuBarView: View {
     private func promptForCustomContextWindow(currentModel: String) {
         let alert = NSAlert()
         alert.messageText = L.contextWindowCustomTitle
-        alert.informativeText = L.contextWindowCustomMessage(currentModel)
+        alert.informativeText = L.contextWindowCustomMessage(currentModel) + "\n输入的是请求配置值；有效窗口受当前模型上限与预留比例限制，以实际上报为准。"
         alert.addButton(withTitle: L.save)
         alert.addButton(withTitle: L.cancel)
 
@@ -1970,13 +2003,28 @@ struct MenuBarView: View {
     }
 
     private func updateSelectedContextWindow(_ contextWindow: Int?, for modelID: String) async {
+        let window = contextWindow ?? CodexBarGlobalSettings.defaultContextWindow(for: modelID)
+        let target = self.desktopThreadSettings.target
         do {
-            try await self.desktopThreadSettings.apply(
-                model: self.desktopThreadSettings.preset.model,
-                reasoningEffort: self.desktopThreadSettings.preset.reasoningEffort,
-                serviceTier: self.desktopThreadSettings.preset.serviceTier,
-                contextWindow: contextWindow ?? CodexBarGlobalSettings.defaultContextWindow(for: modelID)
-            )
+            if case .thread = target {
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = "使用新的上下文窗口继续对话？"
+                alert.informativeText = "将继承当前聊天历史创建分支。\n"
+                    + self.contextWindowChoiceLabel(window, limits: CodexModelContextLimits.read(model: modelID))
+                    + "\n预计值根据当前模型目录计算，最终以 Codex 实际上报为准。原对话保留，无需重启 Codex。"
+                alert.addButton(withTitle: "创建分支并继续")
+                alert.addButton(withTitle: L.cancel)
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                try await self.desktopThreadSettings.createContextWindowBranch(window, expectedTarget: target)
+            } else {
+                try await self.desktopThreadSettings.apply(
+                    model: self.desktopThreadSettings.preset.model,
+                    reasoningEffort: self.desktopThreadSettings.preset.reasoningEffort,
+                    serviceTier: self.desktopThreadSettings.preset.serviceTier,
+                    contextWindow: window
+                )
+            }
             self.clearError()
         } catch {
             self.setGenericError(error.localizedDescription)
