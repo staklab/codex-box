@@ -24,6 +24,37 @@ function verifySurfaces(attribute) {
   dom.window.close();
   console.log(`${attribute}：主区背景与连续明暗切换通过`);
 }
+function verifyComposerBackdrop() {
+  const dom = new JSDOM(`<html><head><style>
+    .from-surface { background: white; background-image: linear-gradient(to top, white, transparent); }
+  </style><style>${css}</style></head><body>
+    <main class="_MainContentSurface_newhash_2">
+      <div aria-hidden="true" style="height: 120px">
+        <div id="backdrop" aria-hidden="true" class="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-full bg-gradient-to-t from-surface via-surface"></div>
+      </div>
+      <div id="composer" class="_ComposerLayoutRoot_newhash_2"><button>发送</button></div>
+      <div id="content" class="bg-gradient-to-t from-surface via-surface">内容卡片</div>
+    </main>
+  </body></html>`);
+  const w = dom.window;
+  for (const attribute of ['class', 'data-theme']) {
+    for (const mode of ['light', 'dark']) {
+      const root = w.document.documentElement;
+      root.removeAttribute('class'); root.removeAttribute('data-theme');
+      root.setAttribute(attribute, attribute === 'class' ? `electron-${mode}` : mode);
+      const backdrop = w.document.getElementById('backdrop');
+      const style = w.getComputedStyle(backdrop);
+      assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', `${attribute}/${mode} 输入框外围底色应透明`);
+      assert.equal(style.backgroundImage || 'none', 'none', `${attribute}/${mode} 输入框外围应移除装饰渐变`);
+      assert.equal(w.getComputedStyle(backdrop.parentElement).height, '120px', '保留滚动占位高度');
+      assert.equal(w.getComputedStyle(w.document.getElementById('composer')).backgroundColor,
+        mode === 'light' ? 'rgba(248, 250, 249, 0.76)' : 'rgba(18, 20, 20, 0.16)', '保留输入框玻璃底');
+      assert.equal(w.getComputedStyle(w.document.getElementById('content')).backgroundColor, 'rgb(255, 255, 255)', '内容卡片不受装饰层规则影响');
+    }
+  }
+  dom.window.close();
+  console.log('输入框外围透明、滚动占位、玻璃底与内容卡片隔离通过');
+}
 async function verify(mode, attribute = 'class') {
   const dom = new JSDOM(`<html ${attribute}="${attribute === 'class' ? `electron-${mode}` : mode}"><body><button>继续</button></body></html>`, { runScripts: 'outside-only' });
   const w = dom.window;
@@ -62,4 +93,4 @@ async function verify(mode, attribute = 'class') {
   dom.window.close();
   console.log(`${attribute}/${mode}：颜色探针 ${callbacks} 次，重复换肤、点击、恢复通过`);
 }
-(async () => { for (const attribute of ['class', 'data-theme']) { verifySurfaces(attribute); await verify('light', attribute); await verify('dark', attribute); } })().catch(error => { console.error(error); process.exitCode = 1; });
+(async () => { verifyComposerBackdrop(); for (const attribute of ['class', 'data-theme']) { verifySurfaces(attribute); await verify('light', attribute); await verify('dark', attribute); } })().catch(error => { console.error(error); process.exitCode = 1; });

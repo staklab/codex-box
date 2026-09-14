@@ -397,6 +397,12 @@ final class CodexSkinInjectionService: ObservableObject {
           backdrop-filter: none !important;
         }
 
+        /* 对话底部的装饰渐变随滚动区铺在输入框后方；让这层透出壁纸，
+           保留占位高度，保证末条消息仍能滚动到输入框上方。 */
+        main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {
+          background: none !important;
+        }
+
         /* 输入框的硬编码背景、16px 模糊和多层阴影都在 _ComposerLayoutRoot_*，
            Body 本身已透明。类名带构建哈希，因此统一用子串匹配。 */
         [class*="_ComposerLayoutRoot_"],
