@@ -361,16 +361,17 @@ final class CodexSkinInjectionService: ObservableObject {
         put("--diffs-addition-color-override", colors.secondary)
         put("--diffs-deletion-color-override", colors.highlight)
 
+        // 兼容桌面端的 class 与 data-theme 两套外观标记。
         rules.append("""
-        .electron-dark {
+        :is(.electron-dark, [data-theme="dark"]) {
           --cb-scrim: rgba(24, 24, 24, \(Self.darkSurfaceAlpha));
           --cb-scrim-2: rgba(20, 20, 20, \(Self.darkPanelAlpha));
         }
-        .electron-light {
+        :is(.electron-light, [data-theme="light"]) {
           --cb-scrim: rgba(245, 245, 247, \(Self.lightSurfaceAlpha));
           --cb-scrim-2: rgba(240, 240, 242, \(Self.lightPanelAlpha));
         }
-        :root, .electron-dark, .electron-light {
+        :root, :is(.electron-dark, [data-theme="dark"]), :is(.electron-light, [data-theme="light"]) {
           --wb-surface-primary: var(--cb-scrim) !important;
           --color-background-surface: var(--cb-scrim) !important;
           --wb-surface-secondary: var(--cb-scrim-2) !important;
@@ -380,16 +381,16 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* 大面积容器在深浅模式下都保持透明。侧栏自带 70% 模式底色，main 又从
            侧栏边界开始而实际内容晚 16px 起步；分别着色会形成左上色块和竖向分隔带。 */
-        .electron-light .app-shell-left-panel,
-        .electron-dark .app-shell-left-panel,
-        .electron-light main.bg-surface,
-        .electron-dark main.bg-surface,
-        .electron-light main[class*="_MainContentSurface_"],
-        .electron-dark main[class*="_MainContentSurface_"],
-        .electron-light header.h-toolbar,
-        .electron-dark header.h-toolbar,
-        .electron-light header[class*="h-toolbar"],
-        .electron-dark header[class*="h-toolbar"] {
+        :is(.electron-light, [data-theme="light"]) .app-shell-left-panel,
+        :is(.electron-dark, [data-theme="dark"]) .app-shell-left-panel,
+        :is(.electron-light, [data-theme="light"]) main.bg-surface,
+        :is(.electron-dark, [data-theme="dark"]) main.bg-surface,
+        :is(.electron-light, [data-theme="light"]) main[class*="_MainContentSurface_"],
+        :is(.electron-dark, [data-theme="dark"]) main[class*="_MainContentSurface_"],
+        :is(.electron-light, [data-theme="light"]) header.h-toolbar,
+        :is(.electron-dark, [data-theme="dark"]) header.h-toolbar,
+        :is(.electron-light, [data-theme="light"]) header[class*="h-toolbar"],
+        :is(.electron-dark, [data-theme="dark"]) header[class*="h-toolbar"] {
           background: transparent !important;
           border-color: transparent !important;
           -webkit-backdrop-filter: none !important;
@@ -411,7 +412,7 @@ final class CodexSkinInjectionService: ObservableObject {
           box-shadow: 0 0 0 0.5px var(--wb-border) !important;
         }
 
-        .electron-light [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-light, [data-theme="light"]) [class*="_ComposerLayoutRoot_"] {
           background: rgba(248, 250, 249, 0.28) !important;
           -webkit-backdrop-filter: blur(10px) saturate(0.90) !important;
           backdrop-filter: blur(10px) saturate(0.90) !important;
@@ -419,7 +420,7 @@ final class CodexSkinInjectionService: ObservableObject {
                       0 4px 18px rgba(36, 51, 46, 0.08) !important;
         }
 
-        .electron-dark [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-dark, [data-theme="dark"]) [class*="_ComposerLayoutRoot_"] {
           background: rgba(18, 20, 20, 0.16) !important;
           -webkit-backdrop-filter: blur(6px) saturate(0.90) !important;
           backdrop-filter: blur(6px) saturate(0.90) !important;
@@ -440,23 +441,23 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* 聊天侧栏为 aside，设置侧栏为 div；两者的补色伪元素都会向右越界。
            深浅模式统一移除，避免侧栏边界出现独立竖带。 */
-        .electron-light .app-shell-left-panel::after,
-        .electron-dark .app-shell-left-panel::after {
+        :is(.electron-light, [data-theme="light"]) .app-shell-left-panel::after,
+        :is(.electron-dark, [data-theme="dark"]) .app-shell-left-panel::after {
           content: none !important;
           background: transparent !important;
         }
 
         /* 模式调节直接作用于壁纸层，避免独立蒙层与 Electron 标题栏分层合成。 */
-        .electron-light body::before {
+        :is(.electron-light, [data-theme="light"]) body::before {
           filter: saturate(1.05);
         }
 
-        .electron-dark body::before {
+        :is(.electron-dark, [data-theme="dark"]) body::before {
           filter: brightness(0.55) saturate(0.90);
         }
 
         /* 浅色壁纸保留色彩，正文与输入区域分别承托深色文字。 */
-        .electron-light {
+        :is(.electron-light, [data-theme="light"]) {
           --wb-text-primary: #18232b !important;
           --wb-text-tertiary: #1c252e !important;
           --color-text-primary: #18232b !important;
@@ -464,27 +465,27 @@ final class CodexSkinInjectionService: ObservableObject {
           --color-text-tertiary: #1c252e !important;
         }
         /* 标题栏、侧栏与主区共用连续的高透表面。 */
-        .electron-light main[class*="_MainContentSurface_"],
-        .electron-light header.h-toolbar,
-        .electron-light header[class*="h-toolbar"],
-        .electron-light .app-shell-left-panel {
+        :is(.electron-light, [data-theme="light"]) main[class*="_MainContentSurface_"],
+        :is(.electron-light, [data-theme="light"]) header.h-toolbar,
+        :is(.electron-light, [data-theme="light"]) header[class*="h-toolbar"],
+        :is(.electron-light, [data-theme="light"]) .app-shell-left-panel {
           background: rgba(248, 250, 249, 0.10) !important;
           border-color: transparent !important;
           -webkit-backdrop-filter: none !important;
           backdrop-filter: none !important;
         }
-        .electron-light header.h-toolbar,
-        .electron-light header[class*="h-toolbar"],
-        .electron-light .app-shell-left-panel {
+        :is(.electron-light, [data-theme="light"]) header.h-toolbar,
+        :is(.electron-light, [data-theme="light"]) header[class*="h-toolbar"],
+        :is(.electron-light, [data-theme="light"]) .app-shell-left-panel {
           text-shadow: none !important;
         }
-        .electron-light [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-light, [data-theme="light"]) [class*="_ComposerLayoutRoot_"] {
           background: rgba(248, 250, 249, 0.76) !important;
         }
-        .electron-light [role="menu"],
-        .electron-light [role="dialog"],
-        .electron-light [role="listbox"],
-        .electron-light pre {
+        :is(.electron-light, [data-theme="light"]) [role="menu"],
+        :is(.electron-light, [data-theme="light"]) [role="dialog"],
+        :is(.electron-light, [data-theme="light"]) [role="listbox"],
+        :is(.electron-light, [data-theme="light"]) pre {
           background: rgba(248, 250, 249, 0.96) !important;
           color: #18232b !important;
         }
