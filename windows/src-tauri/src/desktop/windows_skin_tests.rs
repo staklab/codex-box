@@ -28,6 +28,20 @@ async fn cdp(target: &CdpTarget, method: &str, params: Value) -> Value {
     }).await.expect("CDP 测试超时")
 }
 
+// 官方客户端冷启动还会初始化后台服务和辅助窗口，短暂阻塞 /json。
+// 在同一端口等待真实主窗口恢复；超过截止时间仍失败，不重启或跳过验证。
+async fn wait_for_official_main_target(port: u16) -> CdpTarget {
+    tokio::time::timeout(Duration::from_secs(45), async {
+        loop {
+            match healthy_main_target(port).await {
+                Ok(target) => return target,
+                Err(error) => eprintln!("等待官方客户端就绪：{error}"),
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }).await.expect("官方客户端未在 45 秒内恢复可用")
+}
+
 #[tokio::test]
 #[ignore = "由 Windows 工作流准备独立 Electron 与 CLI 后运行"]
 async fn windows_skin_end_to_end() {
@@ -120,10 +134,9 @@ async fn official_windows_skin_startup() {
             panic!("官方客户端启动失败：{error}");
         }
     };
-    let target=healthy_main_target(port).await.unwrap();
     drop(ordinary);
     tokio::time::sleep(Duration::from_secs(8)).await;
-    healthy_main_target(port).await.unwrap();
+    let target=wait_for_official_main_target(port).await;
     let screenshot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
     std::fs::write(artifacts.join("official-before.png"),STANDARD.decode(screenshot["data"].as_str().unwrap()).unwrap()).unwrap();
     let theme_id=format!("official-e2e-{}",uuid::Uuid::new_v4());
