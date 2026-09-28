@@ -16,6 +16,14 @@ module.exports = `
         <div data-app-shell-main-content-layout="full-bleed">
           <div id="settings" class="flex h-full min-h-0 flex-col electron:overflow-hidden electron:bg-surface windows:rounded-tl-lg">
             <div class="flex-1 scrollbar-stable overflow-y-auto" style="height:120px; overflow-y:auto">
+              <div data-density="default">
+                <div id="usage-toolbar" class="bg-surface sticky z-30 pt-panel pb-2 after:pointer-events-none after:absolute after:top-full after:right-0 after:left-0 after:bg-linear-to-b after:from-surface after:to-transparent after:content-[''] after:h-8">
+                  <button id="usage-tab" style="background:rgba(128,128,128,0.2)">概览</button><button>分析</button>
+                </div>
+                <div id="shortcut-toolbar" class="bg-surface sticky z-30 pt-panel pb-2 after:pointer-events-none after:absolute after:top-full after:right-0 after:left-0 after:bg-linear-to-b after:from-surface after:to-transparent after:content-[''] after:h-8">
+                  <div id="search-field" class="bg-page-search rounded-full border border-primary-outline"><input id="shortcut-search" placeholder="搜索快捷键"></div>
+                </div>
+              </div>
               <section id="card" class="bg-surface-secondary" style="height:240px"><button id="toggle">切换</button></section>
             </div>
           </div>

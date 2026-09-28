@@ -30,11 +30,13 @@ function verifyCurrentShell() {
     [data-app-shell-frame], [data-app-shell-main-surface], [data-app-shell-main-titlebar],
     [class~="electron:bg-surface"], .bg-surface-secondary { background: rgb(24, 24, 24); }
     ._PageSurfaceLayout_gs442_2 ._LeftPanel_gs442_2 .sidebar-navigation { background: rgba(24, 24, 24, 0.65); }
+    .sticky.bg-surface { background: rgb(255,255,255); position: sticky; top: 0; }
+    .bg-page-search { background: rgb(255,255,255); border: 1px solid gray; }
   </style><style>${css}</style></head><body>${fixture}</body></html>`);
   const w = dom.window;
   for (const mode of ['light', 'dark', 'light']) {
     w.document.documentElement.setAttribute('data-theme', mode);
-    for (const id of ['frame', 'titlebar', 'settings', 'sidebar']) {
+    for (const id of ['frame', 'titlebar', 'settings', 'sidebar', 'usage-toolbar', 'shortcut-toolbar', 'search-field']) {
       assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
         'rgba(0, 0, 0, 0)', `${mode}/${id} 新版页面背景应透明`);
     }
@@ -47,11 +49,20 @@ function verifyCurrentShell() {
       'rgba(128, 128, 128, 0.2)', '保留侧栏会话选中态');
     assert.equal(w.getComputedStyle(scroll).height, '120px');
     assert.equal(w.getComputedStyle(scroll).overflowY, 'auto');
+    assert.equal(w.getComputedStyle(w.document.getElementById('usage-toolbar')).position, 'sticky');
+    assert.equal(w.getComputedStyle(w.document.getElementById('usage-tab')).backgroundColor,
+      'rgba(128, 128, 128, 0.2)', '保留概览标签选中态');
+    assert.equal(w.getComputedStyle(w.document.getElementById('search-field')).borderTopWidth, '1px', '保留搜索控件边界');
   }
   let clicks = 0;
   w.document.getElementById('toggle').addEventListener('click', () => clicks++);
   w.document.getElementById('toggle').click();
   assert.equal(clicks, 1, '设置控件仍可交互');
+  const search = w.document.getElementById('shortcut-search');
+  let inputValue;
+  search.addEventListener('input', () => { inputValue = search.value; });
+  search.value = '复制'; search.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(inputValue, '复制', '快捷键搜索输入仍正常');
   dom.window.close();
   console.log('新版外壳、设置主区、局部卡片与滚动交互通过');
 }

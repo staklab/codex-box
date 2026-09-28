@@ -497,6 +497,13 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
   background: transparent !important;
 }}
 
+/* 设置页的吸顶工具栏和底部渐变应透出壁纸，保留吸顶布局与控件状态。 */
+[data-app-shell-main-content-layout="full-bleed"] [data-density] > .sticky.z-30.bg-surface.pt-panel.pb-2,
+[data-app-shell-main-content-layout="full-bleed"] [data-density] > .sticky.z-30.bg-surface.pt-panel.pb-2::after,
+[data-app-shell-main-content-layout="full-bleed"] [data-density] > .sticky.z-30.bg-surface.pt-panel.pb-2 .bg-page-search {{
+  background: transparent !important;
+}}
+
 /* 导航轨道旁的项目/设置列表另叠了 65% surface；仅移除列表容器底色，
    保留行悬停、选中态及弹出菜单。 */
 .app-shell-left-panel .sidebar-navigation {{
