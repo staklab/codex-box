@@ -473,19 +473,51 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
     }
     let mut css = format!(
         r#"
-.electron-dark{{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60)}}
-.electron-light{{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70)}}
-:root,.electron-dark,.electron-light{{--wb-surface-primary:var(--codexbox-scrim)!important;--color-background-surface:var(--codexbox-scrim)!important;--wb-surface-secondary:var(--codexbox-scrim-2)!important;--color-background-surface-under:var(--codexbox-scrim-2)!important;{}}}
+:is(.electron-dark, [data-theme='dark']){{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60)}}
+:is(.electron-light, [data-theme='light']){{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70)}}
+:root,:is(.electron-dark, [data-theme='dark']),:is(.electron-light, [data-theme='light']){{--wb-surface-primary:var(--codexbox-scrim)!important;--color-background-surface:var(--codexbox-scrim)!important;--wb-surface-secondary:var(--codexbox-scrim-2)!important;--color-background-surface-under:var(--codexbox-scrim-2)!important;{}}}
 .app-shell-left-panel,main.bg-surface,main[class*="_MainContentSurface_"],header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
+/* 新版窗口将页面底色移到了 frame/page-surface，并在工作区追加背景伪元素。
+   只清理外壳底色，保留局部卡片、菜单和输入框自己的表面。 */
+[data-app-shell-frame][data-app-shell-workspace-tab-chrome],
+[data-app-shell-page-surface="true"],
+[data-app-shell-main-surface],
+[data-app-shell-main-titlebar],
+[data-app-shell-left-panel-appearance],
+[data-app-shell-main-surface] [class*="_WorkspaceContent_"]::before {{
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}}
+
+/* 设置详情沿用 full-bleed 布局，但另有 electron:bg-surface 的整页容器。
+   用直属滚动区限定页面层，避免把设置项、弹窗或预览卡片一起变透明。 */
+[data-app-shell-main-content-layout="full-bleed"]
+[class~="electron:bg-surface"].flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable.overflow-y-auto) {{
+  background: transparent !important;
+}}
+
+/* 导航轨道旁的项目/设置列表另叠了 65% surface；仅移除列表容器底色，
+   保留行悬停、选中态及弹出菜单。 */
+.app-shell-left-panel .sidebar-navigation {{
+  background: transparent !important;
+}}
+
+/* 对话底部的装饰渐变随滚动区铺在输入框后方；让这层透出壁纸，
+   保留占位高度，保证末条消息仍能滚动到输入框上方。 */
+main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {{
+  background: none !important;
+}}
+
 [class*="_ComposerLayoutRoot_"],[class*="_ComposerLayoutBody_"]{{background:transparent!important}}
-.electron-light [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
-.electron-dark [class*="_ComposerLayoutRoot_"]{{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
+:is(.electron-light, [data-theme='light']) [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
+:is(.electron-dark, [data-theme='dark']) [class*="_ComposerLayoutRoot_"]{{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
 [class*="_ComposerLayoutRoot_"].gap-2{{border-radius:25px!important;overflow:hidden!important}}
 [class*="_MainContentTopFade_"]{{display:none!important;background:none!important}}
 .app-shell-left-panel::after{{content:none!important;background:transparent!important}}
-.electron-light .app-shell-left-panel,.electron-light main[class*="_MainContentSurface_"],.electron-light header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
-.electron-light{{--color-text-primary:#18232b!important;--color-text-secondary:#1c252e!important;--color-text-tertiary:#1c252e!important}}
-.electron-light [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
+:is(.electron-light, [data-theme='light']) .app-shell-left-panel,:is(.electron-light, [data-theme='light']) main[class*="_MainContentSurface_"],:is(.electron-light, [data-theme='light']) header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
+:is(.electron-light, [data-theme='light']){{--color-text-primary:#18232b!important;--color-text-secondary:#1c252e!important;--color-text-tertiary:#1c252e!important}}
+:is(.electron-light, [data-theme='light']) [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
 body::after{{content:none!important}}
 "#,
         accents.join("")
@@ -507,7 +539,7 @@ body::after{{content:none!important}}
             "image/jpeg"
         };
         css.push_str(&format!(
-            "html,body{{background:transparent!important}}body::before{{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background-image:url(\"data:{mime};base64,{}\");background-size:cover;background-position:center}}.electron-light body::before{{filter:saturate(1.05)}}.electron-dark body::before{{filter:brightness(.55) saturate(.9)}}",
+            "html,body{{background:transparent!important}}body::before{{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background-image:url(\"data:{mime};base64,{}\");background-size:cover;background-position:center}}:is(.electron-light, [data-theme='light']) body::before{{filter:saturate(1.05)}}:is(.electron-dark, [data-theme='dark']) body::before{{filter:brightness(.55) saturate(.9)}}",
             STANDARD.encode(bytes)
         ));
         break;

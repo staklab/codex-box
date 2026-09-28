@@ -397,6 +397,32 @@ final class CodexSkinInjectionService: ObservableObject {
           backdrop-filter: none !important;
         }
 
+        /* 新版窗口将页面底色移到了 frame/page-surface，并在工作区追加背景伪元素。
+           只清理外壳底色，保留局部卡片、菜单和输入框自己的表面。 */
+        [data-app-shell-frame][data-app-shell-workspace-tab-chrome],
+        [data-app-shell-page-surface="true"],
+        [data-app-shell-main-surface],
+        [data-app-shell-main-titlebar],
+        [data-app-shell-left-panel-appearance],
+        [data-app-shell-main-surface] [class*="_WorkspaceContent_"]::before {
+          background: transparent !important;
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+        }
+
+        /* 设置详情沿用 full-bleed 布局，但另有 electron:bg-surface 的整页容器。
+           用直属滚动区限定页面层，避免把设置项、弹窗或预览卡片一起变透明。 */
+        [data-app-shell-main-content-layout="full-bleed"]
+        [class~="electron:bg-surface"].flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable.overflow-y-auto) {
+          background: transparent !important;
+        }
+
+        /* 导航轨道旁的项目/设置列表另叠了 65% surface；仅移除列表容器底色，
+           保留行悬停、选中态及弹出菜单。 */
+        .app-shell-left-panel .sidebar-navigation {
+          background: transparent !important;
+        }
+
         /* 对话底部的装饰渐变随滚动区铺在输入框后方；让这层透出壁纸，
            保留占位高度，保证末条消息仍能滚动到输入框上方。 */
         main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {

@@ -9,7 +9,7 @@ const installer = source.slice(source.indexOf('private static func installerJS')
   .replace('\\(encoded)', Buffer.from('body { --test: 1; }').toString('base64'));
 const remover = source.slice(source.indexOf('func removeSkin()')).split('let js = """')[1].split('"""')[0];
 // 使用生产 CSS 验证主区透明规则，以及运行中切换外观后的匹配。
-const css = source.slice(source.indexOf('private func buildCSS')).split('rules.append("""')[1].split('""")')[0]
+let css = source.slice(source.indexOf('private func buildCSS')).split('rules.append("""')[1].split('""")')[0]
   .replace(/\\\(Self\.(\w+)\)/g, (_, name) => source.match(new RegExp(`static let ${name} = ([0-9.]+)`))[1])
   .replace('\\(accents.joined(separator: "\\n"))', '');
 function verifySurfaces(attribute) {
@@ -23,6 +23,37 @@ function verifySurfaces(attribute) {
   }
   dom.window.close();
   console.log(`${attribute}：主区背景与连续明暗切换通过`);
+}
+function verifyCurrentShell() {
+  const fixture = require('./fixtures_skin_shell.cjs');
+  const dom = new JSDOM(`<html><head><style>
+    [data-app-shell-frame], [data-app-shell-main-surface], [data-app-shell-main-titlebar],
+    [class~="electron:bg-surface"], .bg-surface-secondary { background: rgb(24, 24, 24); }
+    ._PageSurfaceLayout_gs442_2 ._LeftPanel_gs442_2 .sidebar-navigation { background: rgba(24, 24, 24, 0.65); }
+  </style><style>${css}</style></head><body>${fixture}</body></html>`);
+  const w = dom.window;
+  for (const mode of ['light', 'dark', 'light']) {
+    w.document.documentElement.setAttribute('data-theme', mode);
+    for (const id of ['frame', 'titlebar', 'settings', 'sidebar']) {
+      assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
+        'rgba(0, 0, 0, 0)', `${mode}/${id} 新版页面背景应透明`);
+    }
+    for (const id of ['card', 'preview']) {
+      assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
+        'rgb(24, 24, 24)', `${mode}/${id} 局部内容表面应保留`);
+    }
+    const scroll = w.document.querySelector('.scrollbar-stable');
+    assert.equal(w.getComputedStyle(w.document.getElementById('selected')).backgroundColor,
+      'rgba(128, 128, 128, 0.2)', '保留侧栏会话选中态');
+    assert.equal(w.getComputedStyle(scroll).height, '120px');
+    assert.equal(w.getComputedStyle(scroll).overflowY, 'auto');
+  }
+  let clicks = 0;
+  w.document.getElementById('toggle').addEventListener('click', () => clicks++);
+  w.document.getElementById('toggle').click();
+  assert.equal(clicks, 1, '设置控件仍可交互');
+  dom.window.close();
+  console.log('新版外壳、设置主区、局部卡片与滚动交互通过');
 }
 function verifyComposerBackdrop() {
   const dom = new JSDOM(`<html><head><style>
@@ -93,4 +124,20 @@ async function verify(mode, attribute = 'class') {
   dom.window.close();
   console.log(`${attribute}/${mode}：颜色探针 ${callbacks} 次，重复换肤、点击、恢复通过`);
 }
-(async () => { verifyComposerBackdrop(); for (const attribute of ['class', 'data-theme']) { verifySurfaces(attribute); await verify('light', attribute); await verify('dark', attribute); } })().catch(error => { console.error(error); process.exitCode = 1; });
+(async () => {
+  const windowsSource = fs.readFileSync(path.join(__dirname, '../windows/src-tauri/src/desktop.rs'), 'utf8');
+  const windowsCSS = windowsSource.slice(windowsSource.indexOf('fn build_css('))
+    .split('let mut css = format!(')[1].split('r#"')[1].split('"#,')[0]
+    .replace('{}', '').replace(/\{\{/g, '{').replace(/\}\}/g, '}');
+  for (const [platform, productionCSS] of [['macOS', css], ['Windows', windowsCSS]]) {
+    console.log(`${platform} 生产样式回归`);
+    css = productionCSS;
+    verifyCurrentShell();
+    verifyComposerBackdrop();
+    for (const attribute of ['class', 'data-theme']) verifySurfaces(attribute);
+  }
+  for (const attribute of ['class', 'data-theme']) {
+    await verify('light', attribute);
+    await verify('dark', attribute);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

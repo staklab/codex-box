@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["windows/**", "codexBar/Resources/**", "scripts/test_desktop_*.cjs", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "codexBar/Resources/**", "codexBar/Services/CodexSkinInjectionService.swift", "scripts/*skin*.cjs", "scripts/test_desktop_*.cjs", ".github/workflows/windows.yml"]
   pull_request:
-    paths: ["windows/**", "codexBar/Resources/**", "scripts/test_desktop_*.cjs", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "codexBar/Resources/**", "codexBar/Services/CodexSkinInjectionService.swift", "scripts/*skin*.cjs", "scripts/test_desktop_*.cjs", ".github/workflows/windows.yml"]
 
 permissions:
   contents: read
@@ -35,6 +35,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm test
+      - name: 双平台主题背景回归
+        working-directory: .
+        run: node scripts/test_skin_injection.cjs
       - name: 共享路由脚本回归
         working-directory: .
         run: node scripts/test_desktop_thread_route.cjs

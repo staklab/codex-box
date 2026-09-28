@@ -64,11 +64,13 @@ async fn windows_skin_end_to_end() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("theme.json"), br##"{"colors":{"accent":"#308050"}}"##).unwrap();
     std::fs::write(dir.join("image.png"), STANDARD.decode(WALLPAPER_BASE64).unwrap()).unwrap();
-    for mode in ["dark", "light"] {
-        evaluate_target(&target, &format!("document.documentElement.className='electron-{mode}'"), false).await.unwrap();
+    for (attribute, mode) in [("class", "dark"), ("class", "light"), ("data-theme", "dark"), ("data-theme", "light")] {
+        evaluate_target(&target, &format!("document.documentElement.removeAttribute('class');document.documentElement.removeAttribute('data-theme');document.documentElement.setAttribute('{attribute}','{}')", if attribute == "class" { format!("electron-{mode}") } else { mode.into() }), false).await.unwrap();
         inject_theme(&theme_id, port).await.unwrap();
         inject_theme(&theme_id, port).await.unwrap();
-        let data = evaluate_target(&target, r#"(() => {const panel=document.querySelector('.app-shell-left-panel');const r=document.querySelector('#click').getBoundingClientRect();return {count:document.querySelectorAll('#codexbox-skin').length,after:getComputedStyle(panel,'::after').content,image:getComputedStyle(document.body,'::before').backgroundImage,x:r.x+r.width/2,y:r.y+r.height/2,probes:window.probes}})()"#, false).await.unwrap();
+        let data = evaluate_target(&target, r#"(() => {const panel=document.querySelector('.app-shell-left-panel');const r=document.querySelector('#click').getBoundingClientRect();return {count:document.querySelectorAll('#codexbox-skin').length,after:getComputedStyle(panel,'::after').content,image:getComputedStyle(document.body,'::before').backgroundImage,x:r.x+r.width/2,y:r.y+r.height/2,probes:window.probes,sidebar:getComputedStyle(document.querySelector('.sidebar-navigation')).backgroundColor,settings:getComputedStyle(document.querySelector('#settings')).backgroundColor}})()"#, false).await.unwrap();
+        assert_eq!(data["sidebar"], "rgba(0, 0, 0, 0)");
+        assert_eq!(data["settings"], "rgba(0, 0, 0, 0)");
         assert_eq!(data["count"], 1); assert_eq!(data["after"], "none");
         assert!(data["image"].as_str().unwrap().contains("data:image/png;base64,"));
         assert!(data["probes"].as_u64().unwrap()<5);
@@ -79,7 +81,7 @@ async fn windows_skin_end_to_end() {
         assert_eq!(evaluate_target(&target,"window.clicks",false).await.unwrap().as_u64().unwrap(),before+1);
         assert_eq!(evaluate_target(&overlay,"document.querySelectorAll('#codexbox-skin').length",false).await.unwrap(),0);
         let shot=cdp(&target,"Page.captureScreenshot",json!({"format":"png"})).await;
-        std::fs::write(artifacts.join(format!("windows-skin-{mode}.png")),STANDARD.decode(shot["data"].as_str().unwrap()).unwrap()).unwrap();
+        std::fs::write(artifacts.join(format!("windows-skin-{attribute}-{mode}.png")),STANDARD.decode(shot["data"].as_str().unwrap()).unwrap()).unwrap();
     }
     remove_skin(port).await.unwrap();
     assert_eq!(evaluate_target(&target,"document.querySelectorAll('#codexbox-skin').length",false).await.unwrap(),0);
