@@ -473,8 +473,8 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
     }
     let mut css = format!(
         r#"
-:is(.electron-dark, [data-theme='dark']){{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60)}}
-:is(.electron-light, [data-theme='light']){{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70)}}
+:is(.electron-dark, [data-theme='dark']){{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60);--codexbox-skin-glass:rgba(18,20,20,.18)}}
+:is(.electron-light, [data-theme='light']){{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70);--codexbox-skin-glass:rgba(248,250,249,.14)}}
 :root,:is(.electron-dark, [data-theme='dark']),:is(.electron-light, [data-theme='light']){{--wb-surface-primary:var(--codexbox-scrim)!important;--color-background-surface:var(--codexbox-scrim)!important;--wb-surface-secondary:var(--codexbox-scrim-2)!important;--color-background-surface-under:var(--codexbox-scrim-2)!important;{}}}
 .app-shell-left-panel,main.bg-surface,main[class*="_MainContentSurface_"],header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
 /* 新版窗口将页面底色移到了 frame/page-surface，并在工作区追加背景伪元素。
@@ -514,6 +514,49 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
    保留占位高度，保证末条消息仍能滚动到输入框上方。 */
 main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {{
   background: none !important;
+}}
+
+/* 26.928 将输入框外围拆成 footer 实色层和滚动占位中的渐变层。
+   只清理装饰背景，保留 footer、占位及焦点模式的布局。 */
+[data-app-shell-main-surface] [data-thread-scroll-footer],
+[data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.absolute.inset-x-0[class~="-top-8"]:is(.bg-surface, .bg-gradient-to-t.from-surface) {{
+  background: none !important;
+}}
+
+/* dot 内嵌聊天有独立 messaging 底色；消息气泡与附件保持原有语义。 */
+[data-app-shell-main-surface] .messaging-root.messaging-embedded,
+[data-app-shell-main-surface] .messaging-root.messaging-embedded .thread-pane,
+[data-app-shell-main-surface] .messaging-root.messaging-embedded .reply-chain-composer,
+[data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-disclaimer {{
+  background: transparent !important;
+}}
+
+/* 会话选中标签、来源摘要与完成后的文件卡片共用轻薄玻璃表面。
+   保留边界、标签选中标记及按钮交互，不改菜单和 diff 增删底色。 */
+[data-app-shell-tab-controller] [class*="_SelectedSurface_"],
+[data-summary-panel-variant],
+[data-app-shell-main-surface] div[class*="--turn-diff-row-padding-y:"] {{
+  background: var(--codexbox-skin-glass) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+  backdrop-filter: blur(6px) !important;
+}}
+
+[data-app-shell-main-surface] [class~="group/turn-diff-file-row"] button[class~="bg-surface/70"]:not(:hover):not(:focus-visible) {{
+  background: transparent !important;
+}}
+
+/* 摘要卡片的吸顶标题和顶部补色伪元素另有实色底，透出同一层玻璃。 */
+[data-summary-panel-variant] header.sticky.top-2,
+[data-summary-panel-variant] header.sticky.top-2::before {{
+  background: transparent !important;
+}}
+
+/* dot 资料窗口以无样式 dialog 包住 dynamic-isle；只清理这类摘要窗口外层。 */
+:is(.electron-light, [data-theme="light"], .electron-dark, [data-theme="dark"])
+[role="dialog"]:has([data-summary-panel-variant="dynamic-isle"]) {{
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }}
 
 [class*="_ComposerLayoutRoot_"],[class*="_ComposerLayoutBody_"]{{background:transparent!important}}

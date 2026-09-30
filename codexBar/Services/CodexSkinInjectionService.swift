@@ -366,10 +366,12 @@ final class CodexSkinInjectionService: ObservableObject {
         :is(.electron-dark, [data-theme="dark"]) {
           --cb-scrim: rgba(24, 24, 24, \(Self.darkSurfaceAlpha));
           --cb-scrim-2: rgba(20, 20, 20, \(Self.darkPanelAlpha));
+          --codexbox-skin-glass: rgba(18, 20, 20, 0.18);
         }
         :is(.electron-light, [data-theme="light"]) {
           --cb-scrim: rgba(245, 245, 247, \(Self.lightSurfaceAlpha));
           --cb-scrim-2: rgba(240, 240, 242, \(Self.lightPanelAlpha));
+          --codexbox-skin-glass: rgba(248, 250, 249, 0.14);
         }
         :root, :is(.electron-dark, [data-theme="dark"]), :is(.electron-light, [data-theme="light"]) {
           --wb-surface-primary: var(--cb-scrim) !important;
@@ -434,6 +436,41 @@ final class CodexSkinInjectionService: ObservableObject {
            保留占位高度，保证末条消息仍能滚动到输入框上方。 */
         main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {
           background: none !important;
+        }
+
+        /* 26.928 将输入框外围拆成 footer 实色层和滚动占位中的渐变层。
+           只清理装饰背景，保留 footer、占位及焦点模式的布局。 */
+        [data-app-shell-main-surface] [data-thread-scroll-footer],
+        [data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.absolute.inset-x-0[class~="-top-8"]:is(.bg-surface, .bg-gradient-to-t.from-surface) {
+          background: none !important;
+        }
+
+        /* dot 内嵌聊天有独立 messaging 底色；消息气泡与附件保持原有语义。 */
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded,
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded .thread-pane,
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded .reply-chain-composer,
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-disclaimer {
+          background: transparent !important;
+        }
+
+        /* 会话选中标签、来源摘要与完成后的文件卡片共用轻薄玻璃表面。
+           保留边界、标签选中标记及按钮交互，不改菜单和 diff 增删底色。 */
+        [data-app-shell-tab-controller] [class*="_SelectedSurface_"],
+        [data-summary-panel-variant],
+        [data-app-shell-main-surface] div[class*="--turn-diff-row-padding-y:"] {
+          background: var(--codexbox-skin-glass) !important;
+          -webkit-backdrop-filter: blur(6px) !important;
+          backdrop-filter: blur(6px) !important;
+        }
+
+        [data-app-shell-main-surface] [class~="group/turn-diff-file-row"] button[class~="bg-surface/70"]:not(:hover):not(:focus-visible) {
+          background: transparent !important;
+        }
+
+        /* 摘要卡片的吸顶标题和顶部补色伪元素另有实色底，透出同一层玻璃。 */
+        [data-summary-panel-variant] header.sticky.top-2,
+        [data-summary-panel-variant] header.sticky.top-2::before {
+          background: transparent !important;
         }
 
         /* 输入框的硬编码背景、16px 模糊和多层阴影都在 _ComposerLayoutRoot_*，
@@ -527,6 +564,15 @@ final class CodexSkinInjectionService: ObservableObject {
         :is(.electron-light, [data-theme="light"]) pre {
           background: rgba(248, 250, 249, 0.96) !important;
           color: #18232b !important;
+        }
+
+        /* dot 资料窗口以无样式 dialog 包住 dynamic-isle；外层保持透明，
+           避免浅色通用弹窗底色盖住内层摘要玻璃。普通弹窗仍使用原有表面。 */
+        :is(.electron-light, [data-theme="light"], .electron-dark, [data-theme="dark"])
+        [role="dialog"]:has([data-summary-panel-variant="dynamic-isle"]) {
+          background: transparent !important;
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
         }
 
         body::after {
