@@ -531,9 +531,15 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
   background: transparent !important;
 }}
 
+/* dot 输入区以 12px 实色底边留出间距，保留尺寸并透出壁纸。 */
+[data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap {{
+  border-bottom-color: transparent !important;
+}}
+
 /* 会话选中标签、来源摘要与完成后的文件卡片共用轻薄玻璃表面。
+   首个固定标签没有 controller 标记，按标签本身定位选中层。
    保留边界、标签选中标记及按钮交互，不改菜单和 diff 增删底色。 */
-[data-app-shell-tab-controller] [class*="_SelectedSurface_"],
+[data-tab-id] > [class*="_SelectedSurface_"],
 [data-summary-panel-variant],
 [data-app-shell-main-surface] div[class*="--turn-diff-row-padding-y:"] {{
   background: var(--codexbox-skin-glass) !important;

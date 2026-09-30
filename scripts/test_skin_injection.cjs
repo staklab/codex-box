@@ -106,6 +106,7 @@ function verify26928Surfaces() {
     .from-surface { background: white; background-image: linear-gradient(to top, white, transparent); }
     .message-bubble { background: rgb(240,240,240); }
     .border-default { border: 1px solid gray; }
+    :where(.messaging-root) .composer-wrap { border-bottom: 12px solid rgb(255, 255, 255); }
     .sticky { position: sticky; }
     .overflow-y-auto { overflow-y: auto; }
   </style><style>${css}</style></head><body>${fixture}</body></html>`);
@@ -127,7 +128,7 @@ function verify26928Surfaces() {
       }
       assert.match(w.getComputedStyle(root).getPropertyValue('--codexbox-skin-glass'),
         mode === 'light' ? /248.*250.*249.*(?:0?\.14)/ : /18.*20.*20.*(?:0?\.18)/, '玻璃底色应跟随模式');
-      for (const id of ['active-tab', 'sources', 'files', 'dot-profile']) {
+      for (const id of ['active-tab', 'dot-active-tab', 'sources', 'files', 'dot-profile']) {
         const style = w.getComputedStyle(w.document.getElementById(id));
         assert.equal(style.backgroundColor, normalizedGlass.backgroundColor, `${id} 使用模式玻璃底`);
       }
@@ -145,14 +146,22 @@ function verify26928Surfaces() {
         mode === 'light' && css.includes('0.96') ? 'rgba(248, 250, 249, 0.96)' : 'rgb(255, 255, 255)', '保留普通弹窗底色');
       assert.equal(w.getComputedStyle(w.document.getElementById('allow-computer')).backgroundColor, 'rgba(128, 128, 128, 0.4)', '保留机器权限控件状态');
       assert.equal(w.getComputedStyle(w.document.getElementById('active-tab')).borderTopWidth, '1px', '保留选中标签边界');
+      for (const id of ['dot-composer-wrap', 'reply-composer-wrap']) {
+        const style = w.getComputedStyle(w.document.getElementById(id));
+        assert.equal(style.borderBottomColor, 'rgba(0, 0, 0, 0)', `${id} 底部装饰边应透明`);
+        assert.equal(style.borderBottomWidth, '12px', `${id} 保留输入区底部间距`);
+        assert.equal(style.borderBottomStyle, 'solid');
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('standalone-composer-wrap')).borderBottomColor,
+        'rgb(255, 255, 255)', '保留独立消息输入区的底边');
     }
   }
   let clicks = 0;
-  for (const id of ['chat-tab', 'source-link', 'file-row', 'expand-files', 'call-dot']) {
+  for (const id of ['chat-tab', 'dot-tab', 'dot-tab-menu', 'source-link', 'file-row', 'expand-files', 'call-dot']) {
     const button = w.document.getElementById(id);
     button.addEventListener('click', () => clicks++); button.click();
   }
-  assert.equal(clicks, 5, '标签、来源、文件、展开和 dot 电话按钮仍能交互');
+  assert.equal(clicks, 7, '标签、dot 菜单、来源、文件、展开和 dot 电话按钮仍能交互');
   dom.window.close();
   console.log('26.928 输入框装饰、dot、会话标签、来源与文件卡片通过');
 }

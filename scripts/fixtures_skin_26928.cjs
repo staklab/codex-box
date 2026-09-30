@@ -5,6 +5,13 @@ module.exports = `
   <button id="chat-tab" aria-selected="true">审查采序接管状态</button>
 </div>
 <div id="inactive-tab" class="bg-surface">其他标签</div>
+<div class="relative flex shrink-0 items-center overflow-hidden">
+  <div data-tab-id="dot" class="group/tab relative flex h-8 shrink-0 items-center rounded-lg select-none">
+    <div id="dot-active-tab" class="pointer-events-none absolute inset-0 z-0 rounded-md border-hairline border-default bg-surface-elevated-secondary shadow-sm _SelectedSurface_p64dj_1"></div>
+    <button id="dot-tab" role="tab" aria-selected="true">tibo</button>
+    <button id="dot-tab-menu">更多</button>
+  </div>
+</div>
 <main data-app-shell-main-surface="default" class="_MainContentSurface_bo1ta_2">
   <div id="footer" data-thread-scroll-footer="true" class="pointer-events-none absolute inset-x-0 z-20 has-[[data-thread-focus-mode]]:bg-surface bottom-0 pb-4">
     <div id="footer-surface" aria-hidden="true" class="pointer-events-none absolute inset-x-0 -top-8 z-0 bottom-0 mt-8 bg-surface"></div>
@@ -19,7 +26,10 @@ module.exports = `
       <div id="dot-scroll" class="messages-scroll" style="height:120px;overflow-y:auto">
         <div class="message-list" style="height:240px"><div id="bubble" class="message-bubble">你好</div></div>
       </div>
-      <div id="reply-composer" class="reply-chain-composer"><input id="dot-input"></div>
+      <div class="conversation-footer">
+        <div id="dot-composer-wrap" class="composer-wrap"><div class="_ComposerLayoutRoot_newhash_2"><input id="dot-input"></div></div>
+        <div id="reply-composer" class="reply-chain-composer"><div id="reply-composer-wrap" class="composer-wrap"><input id="reply-input"></div></div>
+      </div>
       <p id="disclaimer" class="composer-disclaimer">提示</p>
     </section></div>
   </div>
@@ -56,4 +66,5 @@ module.exports = `
 </div>
 <div id="ordinary-dialog" role="dialog" class="bg-surface"><header id="ordinary-header" class="sticky top-2 bg-surface-elevated-secondary">确认操作</header><button>确认</button></div>
 <div id="attachment-root" class="messaging-root messaging-attachments">附件</div>
+<div class="messaging-root"><div id="standalone-composer-wrap" class="composer-wrap">独立消息输入区</div></div>
 <div id="menu" role="menu" class="bg-surface">菜单</div>`;
