@@ -128,6 +128,45 @@ final class RecordsSnapshotServiceTests: XCTestCase {
         }
     }
 
+    func testTimeoutReturnsBeforeUncooperativeSourceCompletes() async throws {
+        let loader = UncooperativeRecordsLoader()
+        let service = RecordsSnapshotService(sourceLoader: loader, loadTimeout: 0.02)
+        // 即使实现回退，测试也会在 300ms 后结束；真实超时应在此之前返回。
+        let release = Task {
+            try await Task.sleep(nanoseconds: 300_000_000)
+            await loader.release()
+        }
+        let started = Date()
+        do {
+            _ = try await service.loadCurrent()
+            XCTFail("Expected timeout")
+        } catch {
+            XCTAssertEqual(error as? RecordsSnapshotServiceError, .timedOut(timeout: 0.02))
+            XCTAssertLessThan(Date().timeIntervalSince(started), 0.2)
+        }
+        try await release.value
+        await loader.release()
+    }
+
+    func testFullRefreshTimeoutReturnsBeforeUncooperativeSourceCompletes() async throws {
+        let loader = UncooperativeRecordsLoader()
+        let service = RecordsSnapshotService(sourceLoader: loader)
+        let release = Task {
+            try await Task.sleep(nanoseconds: 300_000_000)
+            await loader.release()
+        }
+        let started = Date()
+        do {
+            _ = try await service.refreshAll(timeout: 0.02)
+            XCTFail("Expected timeout")
+        } catch {
+            XCTAssertEqual(error as? RecordsSnapshotServiceError, .timedOut(timeout: 0.02))
+            XCTAssertLessThan(Date().timeIntervalSince(started), 0.2)
+        }
+        try await release.value
+        await loader.release()
+    }
+
     func testLoadCurrentPreservesSourceWarnings() async throws {
         let loader = RecordsSourceSnapshotLoaderStub()
         await loader.setIncrementalSnapshot(
@@ -156,6 +195,19 @@ final class RecordsSnapshotServiceTests: XCTestCase {
 
     private func date(_ value: String) -> Date {
         ISO8601Parsing.parse(value) ?? Date(timeIntervalSince1970: 0)
+    }
+}
+
+private actor UncooperativeRecordsLoader: RecordsSourceSnapshotLoading {
+    private var pending: CheckedContinuation<RecordsSourceSnapshot, Error>?
+
+    func loadRecordsSourceSnapshot(refreshMode: RecordsRefreshMode) async throws -> RecordsSourceSnapshot {
+        try await withCheckedThrowingContinuation { self.pending = $0 }
+    }
+
+    func release() {
+        self.pending?.resume(returning: .init(generatedAt: Date(), refreshMode: .incremental, sessions: [], warnings: []))
+        self.pending = nil
     }
 }
 

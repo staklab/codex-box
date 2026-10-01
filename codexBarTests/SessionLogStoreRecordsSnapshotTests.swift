@@ -2,6 +2,22 @@ import Foundation
 import XCTest
 
 final class SessionLogStoreRecordsSnapshotTests: CodexBarTestCase {
+    @MainActor
+    func testRecordsPageImmediatelyUsesPersistedCache() async throws {
+        let home = try self.makeCodexHome()
+        let first = self.makeStore(home: home)
+        try self.writeFastSession(directory: home.appendingPathComponent(".codex/sessions"), fileName: "cached.jsonl", id: "cached", timestamp: "2026-04-21T08:00:00Z", model: "gpt-6.1-sol", inputTokens: 100, cachedInputTokens: 20, outputTokens: 10)
+        _ = try await first.loadRecordsSourceSnapshot(refreshMode: .incremental)
+        let relaunched = self.makeStore(home: home)
+        let viewModel = SettingsRecordsViewModel(service: RecordsSnapshotService(sourceLoader: relaunched))
+        XCTAssertEqual(viewModel.snapshot?.sessions.map(\.sessionID), ["cached"])
+        XCTAssertEqual(viewModel.snapshot?.models.map(\.modelID), ["gpt-6.1-sol"])
+        XCTAssertFalse(viewModel.shouldShowSkeleton)
+        // 获取首屏快照无需重新遍历日志目录。
+        try FileManager.default.removeItem(at: home.appendingPathComponent(".codex/sessions"))
+        XCTAssertEqual(relaunched.cachedRecordsSourceSnapshot()?.sessions.map(\.sessionID), ["cached"])
+    }
+
     func testHistoricalModelsRefreshSessionCacheIncludesNewSessionModel() throws {
         let home = try self.makeCodexHome()
         let codexRoot = home.appendingPathComponent(".codex", isDirectory: true)

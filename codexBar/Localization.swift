@@ -248,7 +248,7 @@ enum L {
         zh ? "最近更新：\(text)" : "Last updated: \(text)"
     }
     static var settingsRecordsRefreshTimeout: String {
-        zh ? "全量刷新超时，旧快照已保留。" : "The full refresh timed out. The previous snapshot was kept."
+        zh ? "记录刷新超时，已有快照已保留，可稍后重试。" : "Records refresh timed out. The previous snapshot was kept; retry later."
     }
     static var settingsRecordsRetryAction: String { zh ? "重试加载" : "Retry" }
     static var settingsRecordsEmptyState: String {

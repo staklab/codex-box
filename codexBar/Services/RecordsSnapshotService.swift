@@ -55,12 +55,22 @@ struct RecordsSnapshot: Equatable, Sendable {
 }
 
 protocol RecordsSourceSnapshotLoading: Sendable {
+    func cachedRecordsSourceSnapshot() -> RecordsSourceSnapshot?
     func loadRecordsSourceSnapshot(refreshMode: RecordsRefreshMode) async throws -> RecordsSourceSnapshot
 }
 
+extension RecordsSourceSnapshotLoading {
+    func cachedRecordsSourceSnapshot() -> RecordsSourceSnapshot? { nil }
+}
+
 protocol RecordsSnapshotServing: Sendable {
+    func cachedSnapshot() -> RecordsSnapshot?
     func loadCurrent() async throws -> RecordsSnapshot
     func refreshAll(timeout: TimeInterval) async throws -> RecordsSnapshot
+}
+
+extension RecordsSnapshotServing {
+    func cachedSnapshot() -> RecordsSnapshot? { nil }
 }
 
 enum RecordsSnapshotServiceError: LocalizedError, Equatable {
@@ -81,19 +91,26 @@ enum RecordsSnapshotServiceError: LocalizedError, Equatable {
 struct RecordsSnapshotService: RecordsSnapshotServing {
     private let sourceLoader: any RecordsSourceSnapshotLoading
     private let requestCoordinator: RecordsSnapshotRequestCoordinator
+    private let loadTimeout: TimeInterval
 
     init(
         sourceLoader: any RecordsSourceSnapshotLoading = SessionLogStore.shared,
-        requestCoordinator: RecordsSnapshotRequestCoordinator = RecordsSnapshotRequestCoordinator()
+        requestCoordinator: RecordsSnapshotRequestCoordinator = RecordsSnapshotRequestCoordinator(),
+        loadTimeout: TimeInterval = 15
     ) {
         self.sourceLoader = sourceLoader
         self.requestCoordinator = requestCoordinator
+        self.loadTimeout = max(0, loadTimeout)
+    }
+
+    func cachedSnapshot() -> RecordsSnapshot? {
+        self.sourceLoader.cachedRecordsSourceSnapshot().map(Self.makeSnapshot(from:))
     }
 
     func loadCurrent() async throws -> RecordsSnapshot {
         try await self.requestCoordinator.runRequest(
             refreshMode: .incremental,
-            timeout: nil,
+            timeout: self.loadTimeout,
             sourceLoader: self.sourceLoader,
             makeSnapshot: Self.makeSnapshot(from:)
         )
@@ -108,7 +125,7 @@ struct RecordsSnapshotService: RecordsSnapshotServing {
         )
     }
 
-    private static func makeSnapshot(from sourceSnapshot: RecordsSourceSnapshot) -> RecordsSnapshot {
+    nonisolated private static func makeSnapshot(from sourceSnapshot: RecordsSourceSnapshot) -> RecordsSnapshot {
         RecordsSnapshot(
             generatedAt: sourceSnapshot.generatedAt,
             refreshMode: sourceSnapshot.refreshMode,
@@ -118,7 +135,7 @@ struct RecordsSnapshotService: RecordsSnapshotServing {
         )
     }
 
-    private static func models(from sessions: [HistoricalSessionRecord]) -> [HistoricalModelRecord] {
+    nonisolated private static func models(from sessions: [HistoricalSessionRecord]) -> [HistoricalModelRecord] {
         let groupedSessions = Dictionary(grouping: sessions, by: \.modelID)
         return groupedSessions.map { modelID, groupedRecords in
             HistoricalModelRecord(
@@ -130,7 +147,7 @@ struct RecordsSnapshotService: RecordsSnapshotServing {
         .sorted(by: Self.shouldSortModelsBefore)
     }
 
-    private static func shouldSortSessionsBefore(
+    nonisolated private static func shouldSortSessionsBefore(
         _ lhs: HistoricalSessionRecord,
         _ rhs: HistoricalSessionRecord
     ) -> Bool {
@@ -143,7 +160,7 @@ struct RecordsSnapshotService: RecordsSnapshotServing {
         return lhs.sessionID < rhs.sessionID
     }
 
-    private static func shouldSortModelsBefore(
+    nonisolated private static func shouldSortModelsBefore(
         _ lhs: HistoricalModelRecord,
         _ rhs: HistoricalModelRecord
     ) -> Bool {
@@ -156,7 +173,7 @@ struct RecordsSnapshotService: RecordsSnapshotServing {
         return lhs.modelID.localizedCaseInsensitiveCompare(rhs.modelID) == .orderedAscending
     }
 
-    private static func shouldSortWarningsBefore(
+    nonisolated private static func shouldSortWarningsBefore(
         _ lhs: RecordsSnapshotWarning,
         _ rhs: RecordsSnapshotWarning
     ) -> Bool {
@@ -231,36 +248,66 @@ actor RecordsSnapshotRequestCoordinator: Sendable {
         }
 
         let clampedTimeout = max(0, timeout)
-        return try await withThrowingTaskGroup(of: Result<RecordsSnapshot, Error>.self) { group in
-            group.addTask {
-                do {
-                    return .success(try await task.value)
-                } catch {
-                    return .failure(error)
+        // 任务组退出会等待所有子任务；GCD 扫描的 continuation 不会自动响应取消。
+        // 用一次性结果接收器竞争，超时后立即归还界面，不等待底层扫描退出。
+        let resolution = RecordsSnapshotResolution()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                resolution.install(continuation)
+                Task { resolution.finish(await task.result) }
+                let timer = Task {
+                    do {
+                        if clampedTimeout > 0 {
+                            try await Task.sleep(nanoseconds: UInt64(clampedTimeout * 1_000_000_000))
+                        }
+                    } catch { return }
+                    if resolution.finish(.failure(RecordsSnapshotServiceError.timedOut(timeout: clampedTimeout))) {
+                        task.cancel()
+                    }
                 }
+                resolution.installTimer(timer)
             }
-            group.addTask {
-                if clampedTimeout > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(clampedTimeout * 1_000_000_000))
-                }
-                return .failure(RecordsSnapshotServiceError.timedOut(timeout: clampedTimeout))
-            }
-
-            let first = try await group.next()
-            group.cancelAll()
-            guard let first else {
-                throw RecordsSnapshotServiceError.requestSuperseded
-            }
-
-            switch first {
-            case .success(let snapshot):
-                return snapshot
-            case .failure(let error):
-                if case RecordsSnapshotServiceError.timedOut = error {
-                    task.cancel()
-                }
-                throw error
-            }
+        } onCancel: {
+            task.cancel()
+            resolution.finish(.failure(CancellationError()))
         }
+    }
+}
+
+nonisolated private final class RecordsSnapshotResolution: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<RecordsSnapshot, Error>?
+    private var continuation: CheckedContinuation<RecordsSnapshot, Error>?
+    private var timer: Task<Void, Never>?
+
+    func install(_ continuation: CheckedContinuation<RecordsSnapshot, Error>) {
+        self.lock.lock()
+        let result = self.result
+        if result == nil { self.continuation = continuation }
+        self.lock.unlock()
+        if let result { continuation.resume(with: result) }
+    }
+
+    func installTimer(_ timer: Task<Void, Never>) {
+        self.lock.lock()
+        let finished = self.result != nil
+        if finished == false { self.timer = timer }
+        self.lock.unlock()
+        if finished { timer.cancel() }
+    }
+
+    @discardableResult
+    func finish(_ result: Result<RecordsSnapshot, Error>) -> Bool {
+        self.lock.lock()
+        guard self.result == nil else { self.lock.unlock(); return false }
+        self.result = result
+        let continuation = self.continuation
+        let timer = self.timer
+        self.continuation = nil
+        self.timer = nil
+        self.lock.unlock()
+        timer?.cancel()
+        continuation?.resume(with: result)
+        return true
     }
 }

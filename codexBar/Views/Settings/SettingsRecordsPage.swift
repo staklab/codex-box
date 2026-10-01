@@ -17,6 +17,7 @@ final class SettingsRecordsViewModel: ObservableObject {
 
     init(service: any RecordsSnapshotServing) {
         self.service = service
+        self.snapshot = service.cachedSnapshot()
     }
 
     var filteredSessions: [HistoricalSessionRecord] {
@@ -84,6 +85,7 @@ final class SettingsRecordsViewModel: ObservableObject {
     }
 
     func loadCurrent() {
+        if self.snapshot == nil { self.snapshot = self.service.cachedSnapshot() }
         let requestToken = self.beginRequest(isRefreshAll: false)
         Task {
             do {
@@ -139,6 +141,7 @@ final class SettingsRecordsViewModel: ObservableObject {
             self.isRefreshingAll = true
             self.isLoadingSnapshot = false
         } else {
+            self.isRefreshingAll = false
             self.isLoadingSnapshot = true
         }
         return self.requestToken

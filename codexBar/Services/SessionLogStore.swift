@@ -313,6 +313,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     private var sessionCache: [URL: CachedSessionRecord] = [:]
     private var sessionLifecycleCache: [URL: CachedSessionLifecycleRecord] = [:]
     private var seedSessionCache: [URL: CachedSessionRecord]?
+    private let recordsSnapshotLock = NSLock()
+    private var recordsSnapshotCache: RecordsSourceSnapshot?
     private lazy var usageLedger = self.loadPersistedUsageLedger()
 
     init(
@@ -343,6 +345,10 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         let loadedSessionCache = self.loadPersistedCache()
         self.sessionCache = loadedSessionCache
         self.seedSessionCache = loadedSessionCache
+        if loadedSessionCache.isEmpty == false {
+            let generatedAt = (try? persistedCacheURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
+            self.publishRecordsSnapshot(from: Array(loadedSessionCache.values), generatedAt: generatedAt)
+        }
     }
 
     convenience init(
@@ -417,16 +423,42 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     func loadRecordsSourceSnapshot(
         refreshMode: RecordsRefreshMode
     ) async throws -> RecordsSourceSnapshot {
-        try await withCheckedThrowingContinuation { continuation in
-            self.queue.async {
-                do {
-                    let snapshot = try self.loadRecordsSourceSnapshotLocked(refreshMode: refreshMode)
-                    continuation.resume(returning: snapshot)
-                } catch {
-                    continuation.resume(throwing: error)
+        let cancellation = RecordsScanCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.queue.async {
+                    do {
+                        try cancellation.check()
+                        let snapshot = try self.loadRecordsSourceSnapshotLocked(refreshMode: refreshMode, cancellation: cancellation)
+                        continuation.resume(returning: snapshot)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
-        }
+        } onCancel: { cancellation.cancel() }
+    }
+
+    func cachedRecordsSourceSnapshot() -> RecordsSourceSnapshot? {
+        self.recordsSnapshotLock.lock()
+        defer { self.recordsSnapshotLock.unlock() }
+        return self.recordsSnapshotCache
+    }
+
+    private func publishRecordsSnapshot(
+        from records: [CachedSessionRecord],
+        generatedAt: Date = Date(),
+        refreshMode: RecordsRefreshMode = .incremental
+    ) {
+        let snapshot = RecordsSourceSnapshot(
+            generatedAt: generatedAt,
+            refreshMode: refreshMode,
+            sessions: self.historicalSessionRecords(from: records),
+            warnings: records.compactMap(\.scanWarning)
+        )
+        self.recordsSnapshotLock.lock()
+        self.recordsSnapshotCache = snapshot
+        self.recordsSnapshotLock.unlock()
     }
 
     func reduceUsageEvents<Result>(
@@ -584,7 +616,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
 
     private func refreshCachedSessionsLocked(
         rebuildAll: Bool,
-        collectWarnings: Bool
+        collectWarnings: Bool,
+        cancellation: RecordsScanCancellation? = nil
     ) throws -> RefreshedCachedSessions {
         let scanResult = try self.sessionFilesThrowing(collectWarnings: collectWarnings)
         let files = scanResult.files
@@ -602,7 +635,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         var parsedSessionIDs: Set<String> = []
 
         for fileURL in files {
-            autoreleasepool {
+            try cancellation?.check()
+            try autoreleasepool {
                 guard let fingerprint = self.fingerprint(for: fileURL) else {
                     if collectWarnings {
                         warnings.append(
@@ -630,8 +664,10 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
                 let parsed = self.parseSession(
                     fileURL,
                     fingerprint: fingerprint,
-                    collectWarning: collectWarnings
+                    collectWarning: collectWarnings,
+                    cancellation: cancellation
                 )
+                try cancellation?.check()
                 didParseSession = true
                 nextSessionCache[fileURL] = parsed.cachedRecord
                 cachedSessions.append(parsed.cachedRecord)
@@ -684,6 +720,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
 
         var didResolveFork = true
         while didResolveFork, pendingForkSessionIDs.isEmpty == false {
+            try cancellation?.check()
             didResolveFork = false
             for sessionID in pendingForkSessionIDs.sorted() {
                 guard let cached = preferredRecordBySessionID[sessionID],
@@ -716,8 +753,10 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
                             fileURL,
                             fingerprint: fileCached.fingerprint,
                             collectWarning: collectWarnings,
-                            inheritedUsageBaseline: inheritedUsage
+                            inheritedUsageBaseline: inheritedUsage,
+                            cancellation: cancellation
                         )
+                        try cancellation?.check()
                         nextSessionCache[fileURL] = reparsed.cachedRecord
                         if collectWarnings, let warning = reparsed.warning {
                             warnings.append(warning)
@@ -749,10 +788,12 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
 
         cachedSessions = Array(nextSessionCache.values)
 
+        try cancellation?.check()
         self.sessionCache = nextSessionCache
         if didParseSession || nextSessionCache.count != previousSessionCache.count {
             self.persistSessionCache(nextSessionCache)
         }
+        self.publishRecordsSnapshot(from: cachedSessions, refreshMode: rebuildAll ? .rebuildAll : .incremental)
 
         var uniqueWarningsByID: [String: RecordsSnapshotWarning] = [:]
         for warning in warnings {
@@ -774,11 +815,13 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     }
 
     private func loadRecordsSourceSnapshotLocked(
-        refreshMode: RecordsRefreshMode
+        refreshMode: RecordsRefreshMode,
+        cancellation: RecordsScanCancellation
     ) throws -> RecordsSourceSnapshot {
         let refreshed = try self.refreshCachedSessionsLocked(
             rebuildAll: refreshMode == .rebuildAll,
-            collectWarnings: true
+            collectWarnings: true,
+            cancellation: cancellation
         )
 
         if self.ensureUsageLedgerSeededLocked(using: refreshed.records) {
@@ -1423,7 +1466,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         _ fileURL: URL,
         fingerprint: FileFingerprint,
         collectWarning _: Bool,
-        inheritedUsageBaseline: Usage? = nil
+        inheritedUsageBaseline: Usage? = nil,
+        cancellation: RecordsScanCancellation? = nil
     ) -> ParsedSessionResult {
         var sessionID: String?
         var sessionDate: Date?
@@ -1444,7 +1488,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         var didStartForkTask = false
         var didEncounterInvalidUsageSample = false
 
-        let didRead = self.enumerateLines(in: fileURL) { line in
+        let didRead = self.enumerateLines(in: fileURL, cancellation: cancellation) { line in
             guard let line else {
                 didEncounterInvalidUsageSample = true
                 return
@@ -1950,7 +1994,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         return Int(digits)
     }
 
-    private func enumerateLines(in fileURL: URL, handleLine: (String?) -> Void) -> Bool {
+    private func enumerateLines(in fileURL: URL, cancellation: RecordsScanCancellation? = nil, handleLine: (String?) -> Void) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
         defer { try? handle.close() }
 
@@ -1961,8 +2005,10 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
 
         do {
             while let chunk = try handle.read(upToCount: chunkSize), chunk.isEmpty == false {
+                try cancellation?.check()
                 buffer.append(chunk)
                 while true {
+                    try cancellation?.check()
                     let searchStart = buffer.index(
                         buffer.startIndex,
                         offsetBy: min(scanOffset, buffer.count)
@@ -2203,6 +2249,24 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
             return String(trimmed.dropFirst("openai/".count))
         }
         return trimmed
+    }
+}
+
+nonisolated private final class RecordsScanCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func cancel() {
+        self.lock.lock()
+        self.cancelled = true
+        self.lock.unlock()
+    }
+
+    func check() throws {
+        self.lock.lock()
+        let cancelled = self.cancelled
+        self.lock.unlock()
+        if cancelled { throw CancellationError() }
     }
 }
 

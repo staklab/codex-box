@@ -82,6 +82,9 @@ struct CodexBarGlobalSettings: Codable {
     static let baseReasoningEffortOptions = ["low", "medium", "high", "xhigh"]
     static let reasoningEffortOptionsByModel = [
         "gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
+        "gpt-6.1-sol": baseReasoningEffortOptions + ["max"],
+        "gpt-6-sol": ["none"] + baseReasoningEffortOptions + ["max"],
+        "gpt-6-luna": ["none"] + baseReasoningEffortOptions + ["max"],
         "gpt-5.6-sol": baseReasoningEffortOptions + ["max", "ultra"],
         "gpt-5.6-terra": baseReasoningEffortOptions + ["max", "ultra"],
         "gpt-5.6-luna": baseReasoningEffortOptions + ["max"],
@@ -92,6 +95,9 @@ struct CodexBarGlobalSettings: Codable {
     static let presetContextWindows = [258_000, 512_000, 1_000_000, gpt56ContextWindow]
     static let defaultContextWindowsByModel = [
         "gpt-6-astra": 1_050_000,
+        "gpt-6.1-sol": 1_050_000,
+        "gpt-6-sol": 1_050_000,
+        "gpt-6-luna": 1_050_000,
         "gpt-5.6": gpt56ContextWindow,
         "gpt-5.6-sol": gpt56ContextWindow,
         "gpt-5.6-terra": gpt56ContextWindow,

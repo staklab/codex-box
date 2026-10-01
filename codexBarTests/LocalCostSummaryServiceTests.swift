@@ -824,6 +824,31 @@ final class LocalCostSummaryServiceTests: CodexBarTestCase {
         )
     }
 
+    func testLoadPricesGPT6TurnsAtTheirRecordedModelAndTier() throws {
+        let home = try self.makeCodexHome()
+        try self.writeSession(
+            directory: home.appendingPathComponent(".codex/sessions", isDirectory: true),
+            fileName: "gpt6-model-tier.jsonl",
+            lines: [
+                #"{"payload":{"type":"session_meta","id":"gpt6-model-tier","timestamp":"2026-04-05T08:00:00Z"}}"#,
+                #"{"payload":{"type":"turn_context","model":"gpt-6.1-sol","service_tier":"default"}}"#,
+                #"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"service_tier":"fast"}}}"#,
+                #"{"timestamp":"2026-04-05T08:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"cache_write_tokens":10,"output_tokens":10}}}}"#,
+                #"{"payload":{"type":"turn_context","model":"gpt-6-sol","service_tier":"default"}}"#,
+                #"{"timestamp":"2026-04-05T08:10:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":40,"cache_write_tokens":20,"output_tokens":20}}}}"#,
+                #"{"payload":{"type":"turn_context","model":"gpt-6-luna","service_tier":"fast"}}"#,
+                #"{"timestamp":"2026-04-05T08:15:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":300,"cached_input_tokens":60,"cache_write_tokens":30,"output_tokens":30}}}}"#,
+            ]
+        )
+        let service = self.makeService(home: home)
+        let now = self.date("2026-04-05T12:00:00Z")
+        let summary = service.load(now: now)
+        XCTAssertEqual(summary.lifetimeTokens, 330)
+        XCTAssertEqual(summary.lifetimeCostUSD, 0.0008299, accuracy: 1e-12)
+        // 从缓存和费用账本重新加载后，仍按每次请求的模型与档位重新计价。
+        XCTAssertEqual(service.load(now: now, refreshSessionCache: false).lifetimeCostUSD, 0.0008299, accuracy: 1e-12)
+    }
+
     func testLoadRepricesHistoricalUsageWhenPricingChanges() throws {
         let home = try self.makeCodexHome()
         let codexRoot = home.appendingPathComponent(".codex", isDirectory: true)
