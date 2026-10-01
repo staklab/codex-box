@@ -1,5 +1,15 @@
-// Codex 26.928.20755：取自 thread-scroll-layout、native-room 和完成文件卡片。
+// Codex 26.928.20755 / 26.928.31416：对话、dot、顶部 portal 与完成文件卡片。
 module.exports = `
+<div data-app-shell-page-surface="true">
+  <div data-app-shell-header-placement="titlebar">
+    <div id="dot-top-fade" aria-hidden="true" class="pointer-events-none absolute top-0 left-[anchor(left)] z-20 w-[anchor-size(width)] origin-top scale-y-150 _background_18gud_1" style="position-anchor:--orbit-messaging-header-fixture"></div>
+    <div id="dot-header" class="pointer-events-none _header_1q7sq_1" style="position-anchor:--orbit-messaging-header-fixture">
+      <button id="dot-header-profile" class="pointer-events-auto">tibo</button>
+      <button id="dot-header-call" class="pointer-events-auto">通话</button>
+    </div>
+    <header data-testid="viewer-header"><div id="viewer-top-fade" class="_background_18gud_1"></div></header>
+  </div>
+</div>
 <div data-app-shell-tab-controller="main" data-tab-id="chat">
   <div id="active-tab" class="pointer-events-none absolute inset-0 z-0 rounded-md border-hairline border-default bg-surface-elevated-secondary shadow-sm _SelectedSurface_p64dj_1"></div>
   <button id="chat-tab" aria-selected="true">审查采序接管状态</button>

@@ -536,6 +536,12 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
   border-bottom-color: transparent !important;
 }}
 
+/* dot 顶部渐变通过 portal 挂到外壳，按独有的定位锚点识别装饰层。
+   保留头像、通话按钮及其他预览工具栏自己的渐变。 */
+[aria-hidden="true"][style*="--orbit-messaging-header-"][class*="_background_"] {{
+  background: none !important;
+}}
+
 /* 会话选中标签、来源摘要与完成后的文件卡片共用轻薄玻璃表面。
    首个固定标签没有 controller 标记，按标签本身定位选中层。
    保留边界、标签选中标记及按钮交互，不改菜单和 diff 增删底色。 */

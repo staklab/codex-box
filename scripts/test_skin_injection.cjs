@@ -107,6 +107,8 @@ function verify26928Surfaces() {
     .message-bubble { background: rgb(240,240,240); }
     .border-default { border: 1px solid gray; }
     :where(.messaging-root) .composer-wrap { border-bottom: 12px solid rgb(255, 255, 255); }
+    ._background_18gud_1 { height: 40px; background: linear-gradient(to bottom, white, transparent); }
+    .scale-y-150 { transform: scaleY(1.5); }
     .sticky { position: sticky; }
     .overflow-y-auto { overflow-y: auto; }
   </style><style>${css}</style></head><body>${fixture}</body></html>`);
@@ -121,7 +123,7 @@ function verify26928Surfaces() {
       w.document.querySelector('head style:last-child').textContent = css.replaceAll('var(--codexbox-skin-glass)', glass);
       const normalizedGlass = w.document.createElement('div').style;
       normalizedGlass.backgroundColor = glass;
-      for (const id of ['footer', 'footer-surface', 'footer-fade', 'dot', 'dot-pane', 'reply-composer', 'disclaimer', 'file-row', 'sources-title', 'sources-header', 'dot-dialog', 'computers-header', 'activity-header']) {
+      for (const id of ['dot-top-fade', 'footer', 'footer-surface', 'footer-fade', 'dot', 'dot-pane', 'reply-composer', 'disclaimer', 'file-row', 'sources-title', 'sources-header', 'dot-dialog', 'computers-header', 'activity-header']) {
         const style = w.getComputedStyle(w.document.getElementById(id));
         assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} 新表面应透明`);
         assert.equal(style.backgroundImage || 'none', 'none', `${id} 应移除背景渐变`);
@@ -146,6 +148,11 @@ function verify26928Surfaces() {
         mode === 'light' && css.includes('0.96') ? 'rgba(248, 250, 249, 0.96)' : 'rgb(255, 255, 255)', '保留普通弹窗底色');
       assert.equal(w.getComputedStyle(w.document.getElementById('allow-computer')).backgroundColor, 'rgba(128, 128, 128, 0.4)', '保留机器权限控件状态');
       assert.equal(w.getComputedStyle(w.document.getElementById('active-tab')).borderTopWidth, '1px', '保留选中标签边界');
+      const topFade = w.getComputedStyle(w.document.getElementById('dot-top-fade'));
+      assert.equal(topFade.height, '40px', '保留 dot 顶部装饰层尺寸');
+      assert.equal(topFade.transform, 'scaleY(1.5)', '保留 dot 顶部布局变换');
+      assert.match(w.getComputedStyle(w.document.getElementById('viewer-top-fade')).backgroundImage,
+        /linear-gradient/, '保留其他预览工具栏的渐变');
       for (const id of ['dot-composer-wrap', 'reply-composer-wrap']) {
         const style = w.getComputedStyle(w.document.getElementById(id));
         assert.equal(style.borderBottomColor, 'rgba(0, 0, 0, 0)', `${id} 底部装饰边应透明`);
@@ -157,11 +164,11 @@ function verify26928Surfaces() {
     }
   }
   let clicks = 0;
-  for (const id of ['chat-tab', 'dot-tab', 'dot-tab-menu', 'source-link', 'file-row', 'expand-files', 'call-dot']) {
+  for (const id of ['dot-header-profile', 'dot-header-call', 'chat-tab', 'dot-tab', 'dot-tab-menu', 'source-link', 'file-row', 'expand-files', 'call-dot']) {
     const button = w.document.getElementById(id);
     button.addEventListener('click', () => clicks++); button.click();
   }
-  assert.equal(clicks, 7, '标签、dot 菜单、来源、文件、展开和 dot 电话按钮仍能交互');
+  assert.equal(clicks, 9, 'dot 顶部按钮、标签、菜单、来源、文件和展开仍能交互');
   dom.window.close();
   console.log('26.928 输入框装饰、dot、会话标签、来源与文件卡片通过');
 }
