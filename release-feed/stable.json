@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.23",
-    "publishedAt": "2026-10-01T06:32:11Z",
-    "summary": "更新 GPT-6.1 Sol、GPT-6 Sol 和 GPT-6 Luna 定价，修复 macOS 记录页持续加载问题",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.23",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.23",
+    "version": "1.2.24",
+    "publishedAt": "2026-10-08T05:11:32Z",
+    "summary": "修复新版 Codex 两层侧栏遮挡主题的问题及 macOS 会话续跑、计数器重置导致的 token 统计异常",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.24",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.24",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.23/codex-box-1.2.23-macOS.dmg",
-        "sha256": "8129895a0dcfd2e5cd31c6bef9f000251e308a6a954f15ceb5b4a4de10b91023"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.24/codex-box-1.2.24-macOS.dmg",
+        "sha256": "6a82f327c12db0a37a6b97795084aeea66fc64516408afe4cfe93bfb83df7386"
       }
     ]
   }
