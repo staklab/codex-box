@@ -8,7 +8,7 @@ struct DailyCostEntry: Identifiable, Codable {
 }
 
 struct LocalCostSummary: Codable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     var schemaVersion: Int
     var todayCostUSD: Double

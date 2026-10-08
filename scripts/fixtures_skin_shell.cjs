@@ -1,8 +1,8 @@
-// Codex 26.924 的外壳与设置详情结构；仅保留影响背景、滚动和交互的节点。
+// Codex 的外壳与设置详情结构，包含 26.930 新增的共同边栏底色。
 module.exports = `
 <div id="frame" class="_PageSurfaceLayout_gs442_2" data-app-shell-frame="true" data-app-shell-page-surface="true" data-app-shell-workspace-tab-chrome="true">
   <aside class="app-shell-left-panel _LeftPanel_gs442_2" data-app-shell-left-panel-appearance="default">
-    <div id="app-shell-sidebar"><div class="flex">
+    <div id="app-shell-sidebar" class="select-none relative box-border flex h-full w-full isolate flex-col ring-1 ring-border bg-surface-secondary/40"><div class="flex">
       <nav id="rail"><button>主页</button></nav>
       <div id="sidebar" class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden sidebar-navigation">
         <nav><button id="project">项目</button><button id="selected" style="background:rgba(128,128,128,0.2)">当前会话</button></nav>

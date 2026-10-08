@@ -320,8 +320,8 @@ enum L {
     static var modelPricingSectionTitle: String { zh ? "历史模型价格" : "Historical Model Pricing" }
     static var modelPricingSectionHint: String {
         zh
-            ? "单价按每 1M tokens 美元计，只用于本地 session 成本估算。token 统计始终来自本地 session，口径固定为 input + cached input + output；未配置价格的模型默认按 0 处理。"
-            : "Prices are in USD per 1M tokens and only used for local session cost estimates. Token counts always come from local sessions using input + cached input + output, and models without pricing default to 0."
+            ? "单价按每 1M tokens 美元计，只用于本地 session 成本估算。token 统计来自本地 session，总量为输入 + 输出，缓存输入已包含在输入中；未配置价格的模型默认按 0 处理。"
+            : "Prices are in USD per 1M tokens and only used for local session cost estimates. Token counts come from local sessions and equal input + output; cached input is already included in input. Models without pricing default to 0."
     }
     static var modelPricingSectionEmpty: String {
         zh ? "还没有从本地 session 里提取到历史模型。" : "No historical models have been extracted from local sessions yet."

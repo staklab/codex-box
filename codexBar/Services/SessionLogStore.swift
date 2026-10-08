@@ -291,6 +291,11 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         let serviceTier: ServiceTier
     }
 
+    private struct UsageSampleIdentity: Hashable {
+        let timestamp: Date
+        let totalUsage: Usage
+    }
+
     private struct SessionStartInfo {
         let parentSessionID: String?
         let isSubagent: Bool
@@ -307,7 +312,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     private let persistedUsageLedgerURL: URL
     private let billableCostCalculator: (String, ServiceTier, Usage, Usage) -> Double?
     private let queue = DispatchQueue(label: "lzl.codexbar.session-log-store", qos: .utility)
-    private let persistedCacheVersion = 8
+    private let persistedCacheVersion = 9
     private let persistedUsageLedgerVersion = 4
 
     private var sessionCache: [URL: CachedSessionRecord] = [:]
@@ -691,16 +696,8 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         }
 
         func preferredRecordsBySessionID() -> [String: CachedSessionRecord] {
-            var preferred: [String: CachedSessionRecord] = [:]
-            for cached in nextSessionCache.values {
-                guard let record = cached.record else { continue }
-                if let existing = preferred[record.id],
-                   self.shouldIngestBefore(existing, cached) {
-                    continue
-                }
-                preferred[record.id] = cached
-            }
-            return preferred
+            Dictionary(uniqueKeysWithValues: self.mergedSessionRecords(from: Array(nextSessionCache.values))
+                .compactMap { cached in cached.record.map { ($0.id, cached) } })
         }
 
         var preferredRecordBySessionID = preferredRecordsBySessionID()
@@ -839,20 +836,7 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
     private func historicalSessionRecords(
         from cachedSessions: [CachedSessionRecord]
     ) -> [HistoricalSessionRecord] {
-        var preferredRecordBySessionID: [String: CachedSessionRecord] = [:]
-        preferredRecordBySessionID.reserveCapacity(cachedSessions.count)
-
-        for cached in cachedSessions {
-            guard let record = cached.record else { continue }
-
-            if let existing = preferredRecordBySessionID[record.id],
-               self.shouldIngestBefore(existing, cached) {
-                continue
-            }
-            preferredRecordBySessionID[record.id] = cached
-        }
-
-        return preferredRecordBySessionID.values.compactMap { cached in
+        return self.mergedSessionRecords(from: cachedSessions).compactMap { cached in
             guard let record = cached.record else { return nil }
             return HistoricalSessionRecord(
                 sessionID: record.id,
@@ -921,9 +905,11 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         var changed = false
 
         for sessionID in groupedBySessionID.keys.sorted() {
-            let records = (groupedBySessionID[sessionID] ?? []).sorted(by: self.shouldIngestBefore)
+            let segments = self.preferredSessionSegments(from: groupedBySessionID[sessionID] ?? [])
+            let records = self.mergedSessionRecords(from: segments)
             let existingSession = ledger.sessions[sessionID]
-            let shouldRebuildPreferredRecord = records.first?.record?.isArchived == false ||
+            let shouldRebuildPreferredRecord = segments.count > 1 ||
+                records.first?.record?.isArchived == false ||
                 existingSession?.events.contains(where: { $0.source == .legacyMigration }) == true
             if shouldRebuildPreferredRecord,
                let preferredRecord = records.first,
@@ -1226,6 +1212,62 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         return source == .legacyMigration ? sessionModel : ""
     }
 
+    private func preferredSessionSegments(from records: [CachedSessionRecord]) -> [CachedSessionRecord] {
+        // 续跑会保留会话 ID，但以新的 session_meta 时间开始另一份日志。
+        // 同一段的当前/归档副本仍只选信息最完整的一份。
+        Dictionary(grouping: records.filter { $0.record != nil }, by: { $0.record!.startedAt })
+            .values.compactMap { $0.sorted(by: self.shouldIngestBefore).first }
+            .sorted { $0.record!.startedAt < $1.record!.startedAt }
+    }
+
+    private func mergedSessionRecords(from cachedSessions: [CachedSessionRecord]) -> [CachedSessionRecord] {
+        let groups = Dictionary(grouping: cachedSessions.filter { $0.record != nil }, by: { $0.record!.id })
+        return groups.keys.sorted().compactMap { sessionID in
+            let segments = self.preferredSessionSegments(from: groups[sessionID] ?? [])
+            guard let first = segments.first, let firstRecord = first.record,
+                  let lastRecord = segments.last?.record else { return nil }
+            guard segments.count > 1 else { return first }
+
+            var knownEventKeys: Set<String> = []
+            var usageEvents: [UsageEvent] = []
+            for segment in segments {
+                for event in segment.usageEvents {
+                    let key = self.ledgerEventKey(
+                        sessionID: sessionID,
+                        timestamp: event.timestamp,
+                        usage: event.usage,
+                        modelID: event.modelID,
+                        turnID: event.turnID,
+                        serviceTier: event.serviceTier,
+                        source: event.source
+                    )
+                    if knownEventKeys.insert(key).inserted {
+                        usageEvents.append(event)
+                    }
+                }
+            }
+            usageEvents.sort { $0.timestamp < $1.timestamp }
+
+            return CachedSessionRecord(
+                fingerprint: first.fingerprint,
+                record: SessionRecord(
+                    id: sessionID,
+                    startedAt: firstRecord.startedAt,
+                    lastActivityAt: segments.compactMap { $0.record?.lastActivityAt }.max() ?? lastRecord.lastActivityAt,
+                    isArchived: segments.allSatisfy { $0.record?.isArchived == true },
+                    model: lastRecord.model,
+                    usage: usageEvents.reduce(.zero) { $0 + $1.usage },
+                    taskLifecycleState: lastRecord.taskLifecycleState,
+                    parentSessionID: firstRecord.parentSessionID,
+                    isSubagent: firstRecord.isSubagent,
+                    inheritedUsageBaseline: firstRecord.inheritedUsageBaseline
+                ),
+                usageEvents: usageEvents,
+                scanWarning: segments.compactMap(\.scanWarning).first
+            )
+        }
+    }
+
     private func shouldIngestBefore(_ lhs: CachedSessionRecord, _ rhs: CachedSessionRecord) -> Bool {
         if lhs.usageEvents.count != rhs.usageEvents.count {
             return lhs.usageEvents.count > rhs.usageEvents.count
@@ -1473,6 +1515,9 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         var sessionDate: Date?
         var model: String?
         var usageHighWater: Usage?
+        var lastUsageTurnID: String?
+        var latestUsageTimestamp: Date?
+        var observedUsageSamples: Set<UsageSampleIdentity> = []
         var currentForkUsageHighWater: Usage?
         var billableUsage = Usage.zero
         var usageEvents: [UsageEvent] = []
@@ -1535,6 +1580,24 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
             let isCurrentForkTask = isForkedSubagent == false || didStartForkTask
             let isUsageSampleCandidate = self.isUsageSampleCandidate(line)
             if let sample = self.parseUsageSample(from: line) {
+                if let timestamp = sample.timestamp,
+                   observedUsageSamples.insert(UsageSampleIdentity(timestamp: timestamp, totalUsage: sample.totalUsage)).inserted == false {
+                    return
+                }
+                let sampleTurnID = sample.turnID ?? currentTurnID
+                // 原生会话续跑时可能从零重新累计；必须有新的回合和时间，
+                // 且 total 等于本次请求的 last，才视作真实重置。
+                if isForkedSubagent == false, parentSessionID == nil,
+                   let highWater = usageHighWater,
+                   let previousTurnID = lastUsageTurnID,
+                   let sampleTurnID, sampleTurnID != previousTurnID,
+                   let timestamp = sample.timestamp,
+                   let latestUsageTimestamp, timestamp > latestUsageTimestamp,
+                   sample.incrementalUsage == sample.totalUsage,
+                   highWater.isZero == false,
+                   sample.totalUsage.isZero == false {
+                    usageHighWater = nil
+                }
                 let incrementalUsage: Usage
                 if isCurrentForkTask {
                     if isForkedSubagent, didSkipForkReplayUsage {
@@ -1596,6 +1659,10 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
                     billableUsage = billableUsage + incrementalUsage
                 }
                 usageHighWater = usageHighWater.map { $0.highWater(with: sample.totalUsage) } ?? sample.totalUsage
+                lastUsageTurnID = sampleTurnID
+                if let timestamp = sample.timestamp {
+                    latestUsageTimestamp = max(latestUsageTimestamp ?? timestamp, timestamp)
+                }
             } else if isUsageSampleCandidate {
                 didEncounterInvalidUsageSample = true
             }
@@ -2128,14 +2195,21 @@ final class SessionLogStore: @unchecked Sendable, RecordsSourceSnapshotLoading {
         let decoder = self.makePersistedJSONDecoder()
 
         guard let persisted = try? decoder.decode(PersistedCache.self, from: data),
-              persisted.version == self.persistedCacheVersion else {
+              persisted.version == self.persistedCacheVersion || persisted.version == 8 else {
             return [:]
         }
 
         var cache: [URL: CachedSessionRecord] = [:]
         cache.reserveCapacity(persisted.files.count)
         for (path, record) in persisted.files {
-            cache[URL(fileURLWithPath: path)] = record
+            // 保留升级前的首屏快照，但强制在后台重新解析旧版本日志缓存。
+            let cached = persisted.version == self.persistedCacheVersion ? record : CachedSessionRecord(
+                fingerprint: FileFingerprint(fileSize: -1, modificationDate: record.fingerprint.modificationDate),
+                record: record.record,
+                usageEvents: record.usageEvents,
+                scanWarning: record.scanWarning
+            )
+            cache[URL(fileURLWithPath: path)] = cached
         }
         return cache
     }

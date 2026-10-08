@@ -98,6 +98,28 @@ final class SessionLogStoreRecordsSnapshotTests: CodexBarTestCase {
         )
     }
 
+    func testRecordsSnapshotMergesResumedSegmentsAndKeepsLatestMetadata() async throws {
+        let home = try self.makeCodexHome()
+        let directory = home.appendingPathComponent(".codex/sessions")
+        try self.writeFastSession(directory: directory, fileName: "original.jsonl", id: "resumed", timestamp: "2026-04-20T08:00:00Z", model: "gpt-5.5", inputTokens: 100, cachedInputTokens: 20, outputTokens: 10)
+        try self.writeFastSession(directory: directory, fileName: "resumed.jsonl", id: "resumed", timestamp: "2026-04-21T08:00:00Z", model: "gpt-6.1-sol", inputTokens: 30, cachedInputTokens: 10, outputTokens: 10)
+        let latestActivity = Date(timeIntervalSinceNow: 60)
+        try FileManager.default.setAttributes([.modificationDate: latestActivity], ofItemAtPath: directory.appendingPathComponent("resumed.jsonl").path)
+
+        let store = self.makeStore(home: home)
+        let snapshot = try await store.loadRecordsSourceSnapshot(refreshMode: .incremental)
+        let record = try XCTUnwrap(snapshot.sessions.first)
+        XCTAssertEqual(snapshot.sessions.count, 1)
+        XCTAssertEqual(record.totalTokens, 150)
+        XCTAssertEqual(record.modelID, "gpt-6.1-sol")
+        XCTAssertEqual(record.startedAt, ISO8601Parsing.parse("2026-04-20T08:00:00Z"))
+        XCTAssertEqual(record.lastActivityAt.timeIntervalSince1970, latestActivity.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertFalse(record.isArchived)
+        XCTAssertEqual(self.makeStore(home: home).cachedRecordsSourceSnapshot()?.sessions.first?.totalTokens, 150)
+        let total = store.reduceBillableEvents(into: 0, refreshSessionCache: false) { $0 += $1.usage.totalTokens }
+        XCTAssertEqual(total, record.totalTokens)
+    }
+
     func testLoadRecordsSourceSnapshotCapturesWarnings() async throws {
         let home = try self.makeCodexHome()
         let codexRoot = home.appendingPathComponent(".codex", isDirectory: true)

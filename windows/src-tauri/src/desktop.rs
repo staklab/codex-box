@@ -504,8 +504,8 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
   background: transparent !important;
 }}
 
-/* 导航轨道旁的项目/设置列表另叠了 65% surface；仅移除列表容器底色，
-   保留行悬停、选中态及弹出菜单。 */
+/* 两层边栏共用的容器及项目/设置列表保持透明，保留行状态与拖动布局。 */
+.app-shell-left-panel #app-shell-sidebar,
 .app-shell-left-panel .sidebar-navigation {{
   background: transparent !important;
 }}

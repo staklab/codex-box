@@ -30,13 +30,14 @@ function verifyCurrentShell() {
     [data-app-shell-frame], [data-app-shell-main-surface], [data-app-shell-main-titlebar],
     [class~="electron:bg-surface"], .bg-surface-secondary { background: rgb(24, 24, 24); }
     ._PageSurfaceLayout_gs442_2 ._LeftPanel_gs442_2 .sidebar-navigation { background: rgba(24, 24, 24, 0.65); }
+    [class~="bg-surface-secondary/40"] { background: rgba(240, 240, 240, 0.4); }
     .sticky.bg-surface { background: rgb(255,255,255); position: sticky; top: 0; }
     .bg-page-search { background: rgb(255,255,255); border: 1px solid gray; }
   </style><style>${css}</style></head><body>${fixture}</body></html>`);
   const w = dom.window;
   for (const mode of ['light', 'dark', 'light']) {
     w.document.documentElement.setAttribute('data-theme', mode);
-    for (const id of ['frame', 'titlebar', 'settings', 'sidebar', 'usage-toolbar', 'shortcut-toolbar', 'search-field']) {
+    for (const id of ['frame', 'titlebar', 'settings', 'app-shell-sidebar', 'sidebar', 'usage-toolbar', 'shortcut-toolbar', 'search-field']) {
       assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
         'rgba(0, 0, 0, 0)', `${mode}/${id} 新版页面背景应透明`);
     }

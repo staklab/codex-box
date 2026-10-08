@@ -423,6 +423,53 @@ final class LocalCostSummaryServiceTests: CodexBarTestCase {
         XCTAssertEqual(summary.dailyEntries[0].costUSD, 0.00212, accuracy: 1e-12)
     }
 
+    func testLoadCountsNativeCounterResetAndReparsesVersion8Cache() throws {
+        let home = try self.makeCodexHome()
+        let directory = home.appendingPathComponent(".codex/sessions", isDirectory: true)
+        let originalSamples = [
+            #"{"timestamp":"2026-04-04T08:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":20},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":20}}}}"#,
+            #"{"timestamp":"2026-04-04T09:10:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":170,"cached_input_tokens":30,"output_tokens":30},"last_token_usage":{"input_tokens":70,"cached_input_tokens":10,"output_tokens":10}}}}"#,
+        ]
+        try self.writeSession(directory: directory, fileName: "reset.jsonl", lines: [
+            #"{"type":"session_meta","payload":{"id":"reset","timestamp":"2026-04-04T08:00:00Z"}}"#,
+            #"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
+            #"{"timestamp":"2026-04-04T08:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"original-turn"}}"#,
+        ] + originalSamples + [
+            #"{"timestamp":"2026-04-05T08:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"resumed-turn"}}"#,
+            #"{"timestamp":"2026-04-05T08:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":30,"cached_input_tokens":0,"output_tokens":10},"last_token_usage":{"input_tokens":30,"cached_input_tokens":0,"output_tokens":10}}}}"#,
+            #"{"timestamp":"2026-04-05T09:10:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"cached_input_tokens":20,"output_tokens":20},"last_token_usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":10}}}}"#,
+            #"{"timestamp":"2026-04-05T09:11:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"cached_input_tokens":20,"output_tokens":20},"last_token_usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":10}}}}"#,
+            // 重置后的首个请求也可能比重置前的累计用量更大。
+            #"{"timestamp":"2026-04-05T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"another-resumed-turn"}}"#,
+            #"{"timestamp":"2026-04-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":40},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":40}}}}"#,
+        ] + originalSamples)
+
+        let now = self.date("2026-04-05T12:00:00Z")
+        let summary = self.makeService(home: home).load(now: now)
+        XCTAssertEqual(summary.todayTokens, 220)
+        XCTAssertEqual(summary.lifetimeTokens, 420)
+        XCTAssertEqual(summary.dailyEntries.map(\.totalTokens), [220, 200])
+
+        let cacheURL = home.appendingPathComponent(".codexbar/test-cost-session-cache.json")
+        var cache = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cacheURL)) as? [String: Any])
+        cache["version"] = 8
+        var files = try XCTUnwrap(cache["files"] as? [String: [String: Any]])
+        let path = try XCTUnwrap(files.keys.first { $0.hasSuffix("/reset.jsonl") })
+        var cached = try XCTUnwrap(files[path])
+        var record = try XCTUnwrap(cached["record"] as? [String: Any])
+        record["usage"] = ["inputTokens": 170, "cachedInputTokens": 30, "outputTokens": 30]
+        cached["record"] = record
+        cached["usageEvents"] = Array((try XCTUnwrap(cached["usageEvents"] as? [[String: Any]])).prefix(2))
+        files[path] = cached
+        cache["files"] = files
+        try JSONSerialization.data(withJSONObject: cache).write(to: cacheURL)
+
+        let restarted = self.makeStore(home: home)
+        XCTAssertEqual(restarted.cachedRecordsSourceSnapshot()?.sessions.first?.totalTokens, 200)
+        XCTAssertEqual(LocalCostSummaryService(sessionLogStore: restarted, calendar: self.utcCalendar()).load(now: now).lifetimeTokens, 420)
+        XCTAssertEqual(restarted.cachedRecordsSourceSnapshot()?.sessions.first?.totalTokens, 420)
+    }
+
     func testLoadSkipsForkedSubagentReplayHistoryAndCountsCurrentTaskUsage() throws {
         let home = try self.makeCodexHome()
         let codexRoot = home.appendingPathComponent(".codex", isDirectory: true)
@@ -568,6 +615,72 @@ final class LocalCostSummaryServiceTests: CodexBarTestCase {
         XCTAssertEqual(summary.dailyEntries.count, 1)
         XCTAssertEqual(summary.dailyEntries[0].totalTokens, 200)
         XCTAssertEqual(summary.dailyEntries[0].costUSD, 0.001615, accuracy: 1e-12)
+    }
+
+    func testLoadIncludesResumedSegmentsAcrossDaysAndAfterRestart() throws {
+        let home = try self.makeCodexHome()
+        let directory = home.appendingPathComponent(".codex/sessions", isDirectory: true)
+        let firstLines = [
+            #"{"type":"session_meta","payload":{"id":"resumed","timestamp":"2026-04-04T08:00:00Z"}}"#,
+            #"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
+            #"{"timestamp":"2026-04-04T08:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":20},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":20}}}}"#,
+            #"{"timestamp":"2026-04-04T09:10:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":170,"cached_input_tokens":30,"output_tokens":30},"last_token_usage":{"input_tokens":70,"cached_input_tokens":10,"output_tokens":10}}}}"#,
+        ]
+        let resumedLines = [
+            #"{"type":"session_meta","payload":{"id":"resumed","timestamp":"2026-04-05T08:00:00Z"}}"#,
+            #"{"type":"turn_context","payload":{"model":"gpt-6.1-sol"}}"#,
+            #"{"timestamp":"2026-04-05T08:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":240,"cached_input_tokens":40,"output_tokens":40},"last_token_usage":{"input_tokens":70,"cached_input_tokens":10,"output_tokens":10}}}}"#,
+        ]
+        try self.writeSession(directory: directory, fileName: "original.jsonl", lines: firstLines)
+        let service = self.makeService(home: home)
+        let now = self.date("2026-04-05T12:00:00Z")
+        XCTAssertEqual(service.load(now: now).lifetimeTokens, 200)
+
+        try self.writeSession(directory: directory, fileName: "resumed.jsonl", lines: resumedLines)
+        // 归档副本与摘要不应再次计入同一段用量。
+        try self.writeSession(directory: home.appendingPathComponent(".codex/archived_sessions"), fileName: "resumed-copy.jsonl", lines: resumedLines)
+        try self.writeFastSession(directory: home.appendingPathComponent(".codex/archived_sessions"), fileName: "original-summary.jsonl", id: "resumed", timestamp: "2026-04-04T08:00:00Z", model: "gpt-5.5", inputTokens: 170, cachedInputTokens: 30, outputTokens: 30)
+
+        let summary = service.load(now: now)
+        XCTAssertEqual(summary.todayTokens, 80)
+        XCTAssertEqual(summary.last30DaysTokens, 280)
+        XCTAssertEqual(summary.lifetimeTokens, 280)
+        XCTAssertEqual(summary.dailyEntries.map(\.totalTokens), [80, 200])
+        let expectedCost = LocalCostPricing.costUSD(model: "gpt-6.1-sol", usage: .init(inputTokens: 70, cachedInputTokens: 10, outputTokens: 10))
+        XCTAssertEqual(summary.todayCostUSD, expectedCost, accuracy: 1e-12)
+        self.assertSummary(self.makeService(home: home).load(now: now), matches: summary)
+
+        try self.writeSession(directory: directory, fileName: "resumed.jsonl", lines: resumedLines + [
+            #"{"timestamp":"2026-04-05T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":290,"cached_input_tokens":50,"output_tokens":45},"last_token_usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":5}}}}"#,
+        ])
+        let updated = service.load(now: now)
+        XCTAssertEqual(updated.todayTokens, 135)
+        XCTAssertEqual(updated.lifetimeTokens, 335)
+        XCTAssertEqual(self.makeService(home: home).load(now: now).lifetimeTokens, 335)
+    }
+
+    func testLoadRepairsArchivedResumedSegmentsWithoutCountingOldDuplicates() throws {
+        let home = try self.makeCodexHome()
+        let directory = home.appendingPathComponent(".codex/archived_sessions", isDirectory: true)
+        for (file, start, event, input) in [
+            ("original.jsonl", "2026-04-04T08:00:00Z", "2026-04-04T08:05:00Z", 100),
+            ("resumed.jsonl", "2026-04-05T08:00:00Z", "2026-04-05T08:05:00Z", 200),
+        ] {
+            try self.writeSession(directory: directory, fileName: file, lines: [
+                #"{"type":"session_meta","payload":{"id":"archived-resumed","timestamp":"\#(start)"}}"#,
+                #"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
+                #"{"timestamp":"\#(event)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\#(input),"cached_input_tokens":0,"output_tokens":0},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":0}}}}"#,
+            ])
+        }
+        try self.writePersistedLedger(home: home, sessionID: "archived-resumed", model: "gpt-5.5", events: [
+            .init(timestamp: self.date("2026-04-04T08:05:00Z"), usage: .init(inputTokens: 100, cachedInputTokens: 0, outputTokens: 0), costUSD: 0),
+            .init(timestamp: self.date("2026-04-05T08:05:00Z"), usage: .init(inputTokens: 200, cachedInputTokens: 0, outputTokens: 0), costUSD: 0),
+        ])
+        let now = self.date("2026-04-05T12:00:00Z")
+        let summary = self.makeService(home: home).load(now: now)
+        XCTAssertEqual(summary.lifetimeTokens, 200)
+        XCTAssertEqual(summary.todayTokens, 100)
+        XCTAssertEqual(self.makeService(home: home).load(now: now).lifetimeTokens, 200)
     }
 
     func testLoadKeepsObservedTotalsAfterArchivedTokenOnlyRewrite() throws {
