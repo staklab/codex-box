@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.24",
-    "publishedAt": "2026-10-08T05:11:32Z",
-    "summary": "修复新版 Codex 两层侧栏遮挡主题的问题及 macOS 会话续跑、计数器重置导致的 token 统计异常",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.24",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.24",
+    "version": "1.2.25",
+    "publishedAt": "2026-10-12T09:59:06Z",
+    "summary": "修复新版 Codex dot 页面在浅色和深色模式下的顶部主题遮挡问题",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.25",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.25",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.24/codex-box-1.2.24-macOS.dmg",
-        "sha256": "6a82f327c12db0a37a6b97795084aeea66fc64516408afe4cfe93bfb83df7386"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.25/codex-box-1.2.25-macOS.dmg",
+        "sha256": "81ab3f9f25466954b7fee6508c354d2e96bf429bb0e71825e85a5d6689697609"
       }
     ]
   }
