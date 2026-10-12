@@ -109,6 +109,8 @@ function verify26928Surfaces() {
     .border-default { border: 1px solid gray; }
     :where(.messaging-root) .composer-wrap { border-bottom: 12px solid rgb(255, 255, 255); }
     ._background_18gud_1 { height: 40px; background: linear-gradient(to bottom, white, transparent); }
+    ._floatingHeader_1u6c1_2 { position: absolute; pointer-events: none; height: 96px; background: linear-gradient(to bottom, white, transparent); }
+    :is(.electron-dark, [data-theme="dark"]) ._floatingHeader_1u6c1_2 { background: linear-gradient(to bottom, black, transparent); }
     .scale-y-150 { transform: scaleY(1.5); }
     .sticky { position: sticky; }
     .overflow-y-auto { overflow-y: auto; }
@@ -124,7 +126,7 @@ function verify26928Surfaces() {
       w.document.querySelector('head style:last-child').textContent = css.replaceAll('var(--codexbox-skin-glass)', glass);
       const normalizedGlass = w.document.createElement('div').style;
       normalizedGlass.backgroundColor = glass;
-      for (const id of ['dot-top-fade', 'footer', 'footer-surface', 'footer-fade', 'dot', 'dot-pane', 'reply-composer', 'disclaimer', 'file-row', 'sources-title', 'sources-header', 'dot-dialog', 'computers-header', 'activity-header']) {
+      for (const id of ['dot-top-fade', 'dot-floating-header', 'footer', 'footer-surface', 'footer-fade', 'dot', 'dot-pane', 'reply-composer', 'disclaimer', 'file-row', 'sources-title', 'sources-header', 'dot-dialog', 'computers-header', 'activity-header']) {
         const style = w.getComputedStyle(w.document.getElementById(id));
         assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} 新表面应透明`);
         assert.equal(style.backgroundImage || 'none', 'none', `${id} 应移除背景渐变`);
@@ -152,8 +154,14 @@ function verify26928Surfaces() {
       const topFade = w.getComputedStyle(w.document.getElementById('dot-top-fade'));
       assert.equal(topFade.height, '40px', '保留 dot 顶部装饰层尺寸');
       assert.equal(topFade.transform, 'scaleY(1.5)', '保留 dot 顶部布局变换');
+      const floatingHeader = w.getComputedStyle(w.document.getElementById('dot-floating-header'));
+      assert.equal(floatingHeader.height, '96px', '保留新版 dot 顶部装饰层尺寸');
+      assert.equal(floatingHeader.position, 'absolute', '保留新版 dot 顶部定位');
+      assert.equal(floatingHeader.pointerEvents, 'none', '新版 dot 装饰层不拦截点击');
       assert.match(w.getComputedStyle(w.document.getElementById('viewer-top-fade')).backgroundImage,
         /linear-gradient/, '保留其他预览工具栏的渐变');
+      assert.match(w.getComputedStyle(w.document.getElementById('viewer-floating-header')).backgroundImage,
+        /linear-gradient/, '保留使用相同浮动类名的其他预览工具栏');
       for (const id of ['dot-composer-wrap', 'reply-composer-wrap']) {
         const style = w.getComputedStyle(w.document.getElementById(id));
         assert.equal(style.borderBottomColor, 'rgba(0, 0, 0, 0)', `${id} 底部装饰边应透明`);
@@ -171,7 +179,7 @@ function verify26928Surfaces() {
   }
   assert.equal(clicks, 9, 'dot 顶部按钮、标签、菜单、来源、文件和展开仍能交互');
   dom.window.close();
-  console.log('26.928 输入框装饰、dot、会话标签、来源与文件卡片通过');
+  console.log('26.928 / 26.1007 输入框装饰、dot 顶部、会话标签、来源与文件卡片通过');
 }
 async function verify(mode, attribute = 'class') {
   const dom = new JSDOM(`<html ${attribute}="${attribute === 'class' ? `electron-${mode}` : mode}"><body><button>继续</button></body></html>`, { runScripts: 'outside-only' });

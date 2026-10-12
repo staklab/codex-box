@@ -1,13 +1,15 @@
-// Codex 26.928.20755 / 26.928.31416：对话、dot、顶部 portal 与完成文件卡片。
+// Codex 26.928 / 26.1007：对话、dot 顶部 portal 与完成文件卡片。
 module.exports = `
 <div data-app-shell-page-surface="true">
   <div data-app-shell-header-placement="titlebar">
     <div id="dot-top-fade" aria-hidden="true" class="pointer-events-none absolute top-0 left-[anchor(left)] z-20 w-[anchor-size(width)] origin-top scale-y-150 _background_18gud_1" style="position-anchor:--orbit-messaging-header-fixture"></div>
+    <div id="dot-floating-header" aria-hidden="true" class="pointer-events-none absolute top-0 left-[anchor(left)] z-20 w-[anchor-size(width)] _floatingHeader_1u6c1_2" style="position-anchor:--orbit-messaging-header-fixture"></div>
     <div id="dot-header" class="pointer-events-none _header_1q7sq_1" style="position-anchor:--orbit-messaging-header-fixture">
       <button id="dot-header-profile" class="pointer-events-auto">tibo</button>
       <button id="dot-header-call" class="pointer-events-auto">通话</button>
     </div>
     <header data-testid="viewer-header"><div id="viewer-top-fade" class="_background_18gud_1"></div></header>
+    <header data-testid="floating-viewer-header"><div id="viewer-floating-header" aria-hidden="true" class="pointer-events-none absolute _floatingHeader_1u6c1_2" style="position-anchor:--viewer-header-fixture"></div></header>
   </div>
 </div>
 <div data-app-shell-tab-controller="main" data-tab-id="chat">

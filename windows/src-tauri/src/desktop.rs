@@ -536,9 +536,10 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
   border-bottom-color: transparent !important;
 }}
 
-/* dot 顶部渐变通过 portal 挂到外壳，按独有的定位锚点识别装饰层。
+/* dot 顶部渐变通过 portal 挂到外壳；26.1007 改用 floatingHeader 类。
+   按独有的定位锚点识别新旧装饰层。
    保留头像、通话按钮及其他预览工具栏自己的渐变。 */
-[aria-hidden="true"][style*="--orbit-messaging-header-"][class*="_background_"] {{
+[aria-hidden="true"][style*="--orbit-messaging-header-"]:is([class*="_background_"], [class*="_floatingHeader_"]) {{
   background: none !important;
 }}
 
