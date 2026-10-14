@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.25",
-    "publishedAt": "2026-10-12T09:59:06Z",
-    "summary": "修复新版 Codex dot 页面在浅色和深色模式下的顶部主题遮挡问题",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.25",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.25",
+    "version": "1.2.26",
+    "publishedAt": "2026-10-14T03:37:32Z",
+    "summary": "修复空间、设置、代码审查与个人资料在浅色和深色模式下的主题背景",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.26",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.26",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.25/codex-box-1.2.25-macOS.dmg",
-        "sha256": "81ab3f9f25466954b7fee6508c354d2e96bf429bb0e71825e85a5d6689697609"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.26/codex-box-1.2.26-macOS.dmg",
+        "sha256": "757dd90a9ae0bd837c5d780207715217c44776961e29c356c0ba7cf35fe711c5"
       }
     ]
   }
