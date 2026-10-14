@@ -304,7 +304,7 @@ final class CodexSkinInjectionService: ObservableObject {
         for target in targets where Self.isMainPageTarget(target) {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
             _ = try await self.evaluate(
-                javascript: Self.installerJS(css: css),
+                javascript: try Self.installerJS(css: css),
                 webSocketURL: wsURL,
                 awaitPromise: false
             )
@@ -316,17 +316,20 @@ final class CodexSkinInjectionService: ObservableObject {
         guard await self.hasLiveDebugTarget(), let port = self.debugPort else { return }
         let targets = try await self.pageTargets(port: port)
         let js = """
-        (() => {
+        (async () => {
+          const settingsCleanup = window.__codexboxSkinSettings?.restore();
+          delete window.__codexboxSkinSettings;
           window.__codexbarSkinAppearance?.restore();
           delete window.__codexbarSkinAppearance;
           const el = document.getElementById('codexbar-skin');
           if (el) el.remove();
+          await settingsCleanup;
           return 'removed';
         })()
         """
         for target in targets {
             guard let wsURL = target.webSocketDebuggerUrl.flatMap(URL.init(string:)) else { continue }
-            _ = try await self.evaluate(javascript: js, webSocketURL: wsURL, awaitPromise: false)
+            _ = try await self.evaluate(javascript: js, webSocketURL: wsURL, awaitPromise: true)
         }
     }
 
@@ -417,6 +420,64 @@ final class CodexSkinInjectionService: ObservableObject {
         [data-app-shell-main-content-layout="full-bleed"]
         [class~="electron:bg-surface"].flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable.overflow-y-auto) {
           background: transparent !important;
+        }
+
+        /* 空间浏览页的站点列表另有整页、内容区和 tabpanel 三层 surface。
+           按页面布局限定背景层，网站缩略图、内容预览和控件继续使用原有表面。 */
+        [data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col.bg-surface:has([data-app-shell-inline-page-header]),
+        [data-app-shell-main-surface] [data-app-shell-inline-page-header] .mx-auto.flex.w-full.flex-1.flex-col.bg-surface:is(.min-h-0, .min-h-full),
+        [data-app-shell-main-surface] [data-app-shell-inline-page-header] [data-sticky][class*="_shell_"]::before,
+        [data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface,
+        [data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface::after {
+          background: transparent !important;
+        }
+
+        /* 设置分组通过内联变量或不同 variant 的 utility 着色。
+           仅在设置布局内替换卡片表面，保持边界、行分隔和按钮状态；
+           模式变量让已打开的卡片在明暗切换时同步更新。 */
+        [data-density][class~="group/settings"] {
+          --color-background-panel: var(--codexbox-skin-glass) !important;
+        }
+
+        [data-density][class~="group/settings"] .flex.flex-col.rounded-2xl:is(
+          [style*="--color-background-panel"],
+          [class~="bg-surface-secondary/92"],
+          [class~="dark:bg-surface-secondary/92"],
+          [class~="bg-(--color-background-primary-soft-alpha)/50"]
+        ) {
+          background: var(--codexbox-skin-glass) !important;
+          -webkit-backdrop-filter: blur(6px) !important;
+          backdrop-filter: blur(6px) !important;
+        }
+
+        /* 个人资料的独立页面以 bg-surface 铺底，用资料滚动区限定页面层。
+           设置中的代码审查通过独立 webview 渲染，宿主底色也应透出壁纸。 */
+        [data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col:is(.bg-surface, [class~="electron:bg-surface"]):has(> .scrollbar-stable[data-profile-scroll]),
+        [data-app-shell-main-surface] [data-profile-scroll] > [class*="_shell_"]::before,
+        [data-density][class~="group/settings"] [data-mcp-app-portal-target] [class~="group/mcp-app"],
+        [data-density][class~="group/settings"] [data-mcp-app-portal-target] [class~="group/mcp-app"] > webview {
+          background: transparent !important;
+        }
+
+        [data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable[data-profile-scroll]) > .relative.z-30.shrink-0.border-b[class~="bg-surface/80"] {
+          background: var(--codexbox-skin-glass) !important;
+        }
+
+        /* 代码审查的 PR 文档既可能在页面内，也可能移到全局嵌入宿主。
+           用文档标题限定审查宿主，跨文档样式由 skin-settings-webviews.js 同步。 */
+        [data-mcp-extension-surface],
+        :is([data-embedded-frame-host-root], [data-mcp-app-portal-target]) [class~="group/mcp-app"]:has(> webview:is([title="Code Review" i], [title="代码审查"])),
+        :is([data-embedded-frame-host-root], [data-mcp-app-portal-target]) [class~="group/mcp-app"] > webview:is([title="Code Review" i], [title="代码审查"]) {
+          background: transparent !important;
+        }
+
+        /* 精选作品空卡片和用量图的零级底色透出壁纸；非零刻度继续沿用图表配色。
+           覆盖图表自身的内联变量，使每天、每周、累计及悬停状态一致。 */
+        [data-profile-scroll] [class*="_showcaseEmptyState_"] {
+          background: var(--codexbox-skin-glass) !important;
+        }
+        [data-profile-scroll] [role="img"][style*="--profile-usage-level-0"] {
+          --profile-usage-level-0: var(--codexbox-skin-glass) !important;
         }
 
         /* 设置页的吸顶工具栏和底部渐变应透出壁纸，保留吸顶布局与控件状态。 */
@@ -655,8 +716,12 @@ final class CodexSkinInjectionService: ObservableObject {
         return rules.joined(separator: "\n\n")
     }
 
-    private static func installerJS(css: String) -> String {
+    private static func installerJS(css: String) throws -> String {
         let encoded = Data(css.utf8).base64EncodedString()
+        guard let url = Bundle.main.url(forResource: "skin-settings-webviews", withExtension: "js") else {
+            throw CodexThemeError.downloadFailed("缺少设置页面的主题样式资源")
+        }
+        let settingsScript = try String(contentsOf: url, encoding: .utf8)
         return """
         (() => {
           window.__codexbarSkinAppearance?.restore();
@@ -669,6 +734,7 @@ final class CodexSkinInjectionService: ObservableObject {
             document.documentElement.appendChild(el);
           }
           el.textContent = css;
+          \(settingsScript)
           return 'ok';
         })()
         """

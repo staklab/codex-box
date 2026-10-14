@@ -438,8 +438,9 @@ pub async fn inject_theme(id: &str, port: u16) -> anyhow::Result<()> {
     let css = build_css(&colors, &directory)?;
     let encoded = STANDARD.encode(css.as_bytes());
     let script = format!(
-        "(() => {{ const css=new TextDecoder().decode(Uint8Array.from(atob('{}'),c=>c.charCodeAt(0))); let el=document.getElementById('codexbox-skin'); if(!el){{el=document.createElement('style');el.id='codexbox-skin';document.documentElement.appendChild(el);}} el.textContent=css; return el.isConnected && el.sheet && el.sheet.cssRules.length > 0 ? 'ok' : 'failed'; }})()",
-        encoded
+        "(() => {{ const css=new TextDecoder().decode(Uint8Array.from(atob('{}'),c=>c.charCodeAt(0))); let el=document.getElementById('codexbox-skin'); if(!el){{el=document.createElement('style');el.id='codexbox-skin';document.documentElement.appendChild(el);}} el.textContent=css; {} return el.isConnected && el.sheet && el.sheet.cssRules.length > 0 ? 'ok' : 'failed'; }})()",
+        encoded,
+        include_str!("../../../codexBar/Resources/skin-settings-webviews.js")
     );
     let target = healthy_main_target(port).await?;
     if evaluate_target(&target, &script, false).await?.as_str() != Some("ok") {
@@ -449,9 +450,9 @@ pub async fn inject_theme(id: &str, port: u16) -> anyhow::Result<()> {
 }
 
 pub async fn remove_skin(port: u16) -> anyhow::Result<()> {
-    let script = "(() => { const el=document.getElementById('codexbox-skin'); if(el) el.remove(); return 'removed'; })()";
+    let script = "(async () => { const cleanup=window.__codexboxSkinSettings?.restore(); delete window.__codexboxSkinSettings; const el=document.getElementById('codexbox-skin'); if(el) el.remove(); await cleanup; return 'removed'; })()";
     for target in page_targets(port).await? {
-        evaluate_target(&target, script, false).await?;
+        evaluate_target(&target, script, true).await?;
     }
     Ok(())
 }
@@ -495,6 +496,62 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
 [data-app-shell-main-content-layout="full-bleed"]
 [class~="electron:bg-surface"].flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable.overflow-y-auto) {{
   background: transparent !important;
+}}
+
+/* 空间浏览页的站点列表另有整页、内容区和 tabpanel 三层 surface。
+   按页面布局限定背景层，网站缩略图、内容预览和控件继续使用原有表面。 */
+[data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col.bg-surface:has([data-app-shell-inline-page-header]),
+[data-app-shell-main-surface] [data-app-shell-inline-page-header] .mx-auto.flex.w-full.flex-1.flex-col.bg-surface:is(.min-h-0, .min-h-full),
+[data-app-shell-main-surface] [data-app-shell-inline-page-header] [data-sticky][class*="_shell_"]::before,
+[data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface,
+[data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface::after {{
+  background: transparent !important;
+}}
+
+/* 设置分组通过内联变量或不同 variant 的 utility 着色。
+   仅在设置布局内替换卡片表面，保持边界、行分隔和按钮状态；
+   模式变量让已打开的卡片在明暗切换时同步更新。 */
+[data-density][class~="group/settings"] {{
+  --color-background-panel: var(--codexbox-skin-glass) !important;
+}}
+
+[data-density][class~="group/settings"] .flex.flex-col.rounded-2xl:is(
+  [style*="--color-background-panel"],
+  [class~="bg-surface-secondary/92"],
+  [class~="dark:bg-surface-secondary/92"],
+  [class~="bg-(--color-background-primary-soft-alpha)/50"]
+) {{
+  background: var(--codexbox-skin-glass) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+  backdrop-filter: blur(6px) !important;
+}}
+
+/* 个人资料的独立页面以 bg-surface 铺底，用资料滚动区限定页面层。
+   设置中的代码审查通过独立 webview 渲染，宿主底色也应透出壁纸。 */
+[data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col:is(.bg-surface, [class~="electron:bg-surface"]):has(> .scrollbar-stable[data-profile-scroll]),
+[data-app-shell-main-surface] [data-profile-scroll] > [class*="_shell_"]::before,
+[data-density][class~="group/settings"] [data-mcp-app-portal-target] [class~="group/mcp-app"],
+[data-density][class~="group/settings"] [data-mcp-app-portal-target] [class~="group/mcp-app"] > webview {{
+  background: transparent !important;
+}}
+
+[data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col:has(> .scrollbar-stable[data-profile-scroll]) > .relative.z-30.shrink-0.border-b[class~="bg-surface/80"] {{
+  background: var(--codexbox-skin-glass) !important;
+}}
+
+/* PR 文档可能在页面内，也可能移到全局嵌入宿主。 */
+[data-mcp-extension-surface],
+:is([data-embedded-frame-host-root], [data-mcp-app-portal-target]) [class~="group/mcp-app"]:has(> webview:is([title="Code Review" i], [title="代码审查"])),
+:is([data-embedded-frame-host-root], [data-mcp-app-portal-target]) [class~="group/mcp-app"] > webview:is([title="Code Review" i], [title="代码审查"]) {{
+  background: transparent !important;
+}}
+
+/* 精选作品空卡片和零级用量透出壁纸，保留非零刻度及悬停反馈。 */
+[data-profile-scroll] [class*="_showcaseEmptyState_"] {{
+  background: var(--codexbox-skin-glass) !important;
+}}
+[data-profile-scroll] [role="img"][style*="--profile-usage-level-0"] {{
+  --profile-usage-level-0: var(--codexbox-skin-glass) !important;
 }}
 
 /* 设置页的吸顶工具栏和底部渐变应透出壁纸，保留吸顶布局与控件状态。 */

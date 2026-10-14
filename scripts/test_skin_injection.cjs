@@ -5,8 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('../windows/node_modules/jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../codexBar/Services/CodexSkinInjectionService.swift'), 'utf8');
+const settingsScript = fs.readFileSync(path.join(__dirname, '../codexBar/Resources/skin-settings-webviews.js'), 'utf8');
 const installer = source.slice(source.indexOf('private static func installerJS')).split('return """')[1].split('"""')[0]
-  .replace('\\(encoded)', Buffer.from('body { --test: 1; }').toString('base64'));
+  .replace('\\(encoded)', Buffer.from('body { --test: 1; }').toString('base64'))
+  .replace('\\(settingsScript)', settingsScript);
 const remover = source.slice(source.indexOf('func removeSkin()')).split('let js = """')[1].split('"""')[0];
 // 使用生产 CSS 验证主区透明规则，以及运行中切换外观后的匹配。
 let css = source.slice(source.indexOf('private func buildCSS')).split('rules.append("""')[1].split('""")')[0]
@@ -98,6 +100,225 @@ function verifyComposerBackdrop() {
   dom.window.close();
   console.log('输入框外围透明、滚动占位、玻璃底与内容卡片隔离通过');
 }
+function verifySpaceSettingsSurfaces() {
+  const fixture = require('./fixtures_skin_space_settings.cjs');
+  const dom = new JSDOM(`<html><head><style>
+    .bg-surface, [class~="electron:bg-surface"], .bg-surface-card,
+    [class~="bg-surface-secondary/92"], [class~="dark:bg-surface-secondary/92"],
+    [class~="bg-(--color-background-primary-soft-alpha)/50"] { background: rgb(255,255,255); }
+    .settings-row { border-bottom: 1px solid gray; }
+    .sticky { position: sticky; }
+    .overflow-y-auto { overflow-y: auto; }
+  </style><style>${css}</style></head><body>${fixture}</body></html>`);
+  const w = dom.window;
+  for (const attribute of ['class', 'data-theme']) {
+    for (const mode of ['light', 'dark', 'light']) {
+      const root = w.document.documentElement;
+      root.removeAttribute('class'); root.removeAttribute('data-theme');
+      root.setAttribute(attribute, attribute === 'class' ? `electron-${mode}` : mode);
+      const glass = w.getComputedStyle(root).getPropertyValue('--codexbox-skin-glass').trim();
+      w.document.querySelector('head style:last-child').textContent = css.replaceAll('var(--codexbox-skin-glass)', glass);
+      const normalizedGlass = w.document.createElement('div').style;
+      normalizedGlass.backgroundColor = glass;
+      for (const id of ['sites-page', 'sites-content', 'sites-tabpanel', 'space-toolbar', 'settings-page']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
+          'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} 空间页面层应透明`);
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('settings-density')).getPropertyValue('--color-background-panel').trim(),
+        glass, '设置布局的内联分组变量应使用模式玻璃底');
+      for (const id of ['settings-secondary', 'settings-form', 'settings-muted']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
+          normalizedGlass.backgroundColor, `${attribute}/${mode}/${id} 设置分组应使用模式玻璃底`);
+      }
+      // jsdom 不计算内联 var 的级联，默认分组的最终背景及标题伪元素另用浏览器验证。
+      for (const id of ['site-card', 'site-thumbnail', 'settings-preview']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
+          'rgb(255, 255, 255)', `${id} 内容预览应保持原有表面`);
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('space-tab')).backgroundColor, 'rgba(128, 128, 128, 0.2)');
+      assert.equal(w.getComputedStyle(w.document.getElementById('settings-toggle')).backgroundColor, 'rgb(50, 128, 255)');
+      assert.equal(w.getComputedStyle(w.document.querySelector('.settings-row')).borderBottomWidth, '1px');
+      assert.equal(w.getComputedStyle(w.document.getElementById('space-toolbar')).position, 'sticky');
+      for (const id of ['space-scroll', 'settings-scroll']) assert.equal(w.getComputedStyle(w.document.getElementById(id)).overflowY, 'auto');
+      assert.equal(w.getComputedStyle(w.document.getElementById('ordinary-inline-group')).getPropertyValue('--color-background-panel'), '', '普通分组不应套用设置变量');
+    }
+  }
+  let clicks = 0;
+  for (const id of ['create-site', 'settings-toggle', 'export-data']) {
+    const button = w.document.getElementById(id);
+    button.addEventListener('click', () => clicks++); button.click();
+  }
+  assert.equal(clicks, 3, '创建站点和设置控件仍可交互');
+  dom.window.close();
+  console.log('空间浏览页、站点页面层、设置分组、连续明暗切换与控件隔离通过');
+}
+function verifyReviewProfileSurfaces() {
+  const fixture = require('./fixtures_skin_review_profile.cjs');
+  const dom = new JSDOM(`<html><head><style>
+    .bg-surface, [class~="electron:bg-surface"], [class~="bg-surface/80"],
+    [class~="group/mcp-app"] { background: rgb(255,255,255); }
+    [class*="_showcaseEmptyState_"] { background: rgb(247,247,247); }
+    .border-b { border-bottom: 1px solid gray; }
+    .overflow-y-auto { overflow-y: auto; }
+  </style><style>${css}</style></head><body>${fixture}</body></html>`);
+  const w = dom.window;
+  for (const attribute of ['class', 'data-theme']) {
+    for (const mode of ['light', 'dark', 'light']) {
+      const root = w.document.documentElement;
+      root.removeAttribute('class'); root.removeAttribute('data-theme');
+      root.setAttribute(attribute, attribute === 'class' ? `electron-${mode}` : mode);
+      const glass = w.getComputedStyle(root).getPropertyValue('--codexbox-skin-glass').trim();
+      w.document.querySelector('head style:last-child').textContent = css.replaceAll('var(--codexbox-skin-glass)', glass);
+      const color = w.document.createElement('div').style;
+      color.backgroundColor = glass;
+      for (const id of ['review-page', 'review-host', 'profile-page', 'profile-settings']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor, 'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} 独立页面背景应透明`);
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('profile-header')).backgroundColor, color.backgroundColor, '资料滚动后的标题背景应跟随模式');
+      assert.equal(w.getComputedStyle(w.document.getElementById('profile-showcase-empty')).backgroundColor, color.backgroundColor, '精选作品空卡片应透出模式玻璃底');
+      assert.equal(w.document.getElementById('profile-activity-chart').matches('[data-profile-scroll] [role="img"][style*="--profile-usage-level-0"]'), true);
+      assert.equal(w.getComputedStyle(w.document.getElementById('profile-header')).borderBottomWidth, '1px');
+      for (const id of ['profile-content-preview', 'profile-lookalike', 'profile-showcase-site', 'profile-showcase-artwork']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor, 'rgb(255, 255, 255)', `${id} 局部预览和其他页面应保留`);
+      }
+      for (const id of ['review-scroll', 'profile-page-scroll', 'profile-settings-scroll']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).overflowY, 'auto');
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('profile-avatar')).backgroundColor, 'rgb(205, 243, 255)');
+      assert.equal(w.getComputedStyle(w.document.getElementById('profile-activity-cell')).backgroundColor, 'rgb(50, 128, 255)');
+      assert.equal(w.getComputedStyle(w.document.getElementById('ordinary-showcase-empty')).backgroundColor, 'rgb(247, 247, 247)');
+      assert.equal(w.getComputedStyle(w.document.getElementById('ordinary-activity-chart')).getPropertyValue('--profile-usage-level-0'), 'white');
+    }
+  }
+  // webview 的内联宿主底色由 Chromium 验证；jsdom 不实现跨文档样式或重要性级联。
+  dom.window.close();
+  console.log('代码审查宿主、个人资料页面与精选作品空卡片、预览隔离、连续明暗切换通过');
+}
+
+function verifyReviewWorkspaceSurfaces() {
+  const {host} = require('./fixtures_skin_review_workspace.cjs');
+  const dom = new JSDOM(`<html><head><style>.bg-surface, [class~="group/mcp-app"] {background:white}</style><style>${css}</style></head><body>${host}</body></html>`);
+  const w = dom.window;
+  // Chromium 验证内联底色的 !important 级联；jsdom 检查页面范围和选择器。
+  for (const id of ['review-workspace-surface', 'review-workspace-host', 'review-inline-host']) w.document.getElementById(id).removeAttribute('style');
+  for (const attribute of ['class', 'data-theme']) {
+    for (const mode of ['light', 'dark', 'light']) {
+      const root = w.document.documentElement;
+      root.removeAttribute('class'); root.removeAttribute('data-theme');
+      root.setAttribute(attribute, attribute === 'class' ? `electron-${mode}` : mode);
+      for (const id of ['review-workspace-surface', 'review-workspace-host', 'review-inline-host']) {
+        assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor, 'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} PR 页面及全局宿主应透明`);
+      }
+      assert.equal(w.getComputedStyle(w.document.getElementById('ordinary-embedded-host')).backgroundColor, 'rgb(255, 255, 255)', '其他嵌入预览宿主保留底色');
+    }
+  }
+  dom.window.close();
+  console.log('PR 浏览页、全局与页面内宿主、预览隔离通过');
+}
+
+async function verifySettingsWebviews(platform, install, removeSkin) {
+  const dom = new JSDOM(`<html data-theme="light"><head></head><body>${require('./fixtures_skin_review_profile.cjs')}${require('./fixtures_skin_review_workspace.cjs').host}</body></html>`, {runScripts: 'outside-only'});
+  const w = dom.window;
+  w.TextDecoder = TextDecoder;
+  const settle = () => new Promise(resolve => w.setTimeout(resolve, 0));
+  const mock = view => {
+    const styles = new Map();
+    let calls = 0;
+    view.insertCSS = async css => { const key = `style-${++calls}`; styles.set(key, css); return key; };
+    view.removeInsertedCSS = async key => { styles.delete(key); };
+    return {styles, calls: () => calls, view};
+  };
+  const review = mock(w.document.getElementById('review-webview'));
+  const preview = mock(w.document.getElementById('settings-preview-webview'));
+  const other = mock(w.document.getElementById('ordinary-webview'));
+  const workspace = mock(w.document.getElementById('review-workspace-webview'));
+  const inline = mock(w.document.getElementById('review-inline-webview'));
+  const embeddedPreview = mock(w.document.getElementById('ordinary-embedded-webview'));
+  w.eval(install);
+  await settle();
+  assert.equal(review.styles.size, 1, '设置的独立 webview 应有一份背景样式');
+  assert.equal(preview.calls(), 0, '设置中的其他预览 webview 应保留');
+  assert.equal(other.calls(), 0, '设置以外的 MCP webview 应保留');
+  assert.equal(workspace.styles.size, 1, 'PR 全局宿主中的独立文档应有背景样式');
+  assert.equal(inline.styles.size, 1, '页面内的 PR 文档应适配背景');
+  assert.equal(embeddedPreview.calls(), 0, '全局宿主中的其他预览保持原样');
+  assert.match([...workspace.styles.values()][0], /h-screen/);
+  for (const attribute of ['class', 'data-theme']) {
+    for (const mode of ['dark', 'light']) {
+      const root = w.document.documentElement;
+      root.removeAttribute('class'); root.removeAttribute('data-theme');
+      root.setAttribute(attribute, attribute === 'class' ? `electron-${mode}` : mode);
+      await settle();
+      assert.equal(review.styles.size, 1, '切换明暗应替换旧样式');
+      assert.match([...review.styles.values()][0], mode === 'dark' ? /rgba\(18, 20, 20, 0\.18\)/ : /rgba\(248, 250, 249, 0\.14\)/);
+      assert.equal(workspace.styles.size, 1);
+      assert.match([...workspace.styles.values()][0], mode === 'dark' ? /rgba\(18, 20, 20, 0\.18\)/ : /rgba\(248, 250, 249, 0\.14\)/);
+    }
+  }
+  review.styles.clear(); // webview 导航清除了文档，dom-ready 应重新应用。
+  review.view.dispatchEvent(new w.Event('dom-ready'));
+  await settle();
+  assert.equal(review.styles.size, 1, '独立文档重新就绪时应补回背景样式');
+  w.eval(install);
+  await settle();
+  assert.equal(review.styles.size, 1, '重复应用主题不能积累 webview 样式');
+  assert.equal(workspace.styles.size, 1);
+
+  const guest = new JSDOM(`<html><head><style>.bg-surface, [data-app-shell-main-surface] {background:white}</style><style>${[...workspace.styles.values()][0]}</style></head><body>${require('./fixtures_skin_review_workspace.cjs').document}</body></html>`);
+  for (const id of ['pr-page', 'pr-main', 'pr-detail']) assert.equal(guest.window.getComputedStyle(guest.window.document.getElementById(id)).backgroundColor, 'rgba(0, 0, 0, 0)', `${id} PR 文档页面层应透明`);
+  for (const [id, color] of [['pr-code-preview', 'rgb(255, 255, 255)'], ['pr-addition', 'rgb(220, 252, 231)'], ['pr-deletion', 'rgb(254, 226, 226)']]) assert.equal(guest.window.getComputedStyle(guest.window.document.getElementById(id)).backgroundColor, color, '代码内容与 diff 色保留');
+  guest.window.close();
+
+  workspace.view.setAttribute('title', 'Website Preview');
+  await settle();
+  assert.equal(workspace.styles.size, 0, 'PR webview 改为其他预览时恢复样式');
+  workspace.view.setAttribute('title', 'Code Review');
+  await settle();
+  assert.equal(workspace.styles.size, 1, 'PR 标题稍后就绪时重新适配');
+
+  const parent = review.view.parentElement;
+  w.document.body.append(review.view);
+  await settle();
+  assert.equal(review.styles.size, 0, '离开设置宿主后应恢复独立文档');
+  parent.append(review.view);
+  await settle();
+  assert.equal(review.styles.size, 1, '返回设置宿主后应重新适配');
+
+  const lateView = w.document.createElement('webview');
+  const late = mock(lateView);
+  const insert = lateView.insertCSS;
+  let ready = false;
+  lateView.insertCSS = css => ready ? insert(css) : Promise.reject(new Error('not ready'));
+  parent.append(lateView);
+  await settle();
+  assert.equal(late.styles.size, 0);
+  ready = true;
+  lateView.dispatchEvent(new w.Event('dom-ready'));
+  await settle();
+  assert.equal(late.styles.size, 1, '稍后加载的设置文档应在就绪时适配');
+
+  let resolveInsert;
+  const pendingInsert = new Promise(resolve => { resolveInsert = resolve; });
+  lateView.insertCSS = async css => { await pendingInsert; return insert(css); };
+  lateView.dispatchEvent(new w.Event('dom-ready'));
+  await settle();
+  const cleanup = w.eval(removeSkin);
+  resolveInsert();
+  await cleanup;
+  assert.equal(review.styles.size, 0);
+  assert.equal(workspace.styles.size, 0);
+  assert.equal(inline.styles.size, 0);
+  assert.equal(late.styles.size, 0, '恢复时尚未完成的注入也应被清理');
+  const previousCalls = review.calls();
+  review.view.dispatchEvent(new w.Event('dom-ready'));
+  w.document.documentElement.setAttribute('data-theme', 'dark');
+  await settle();
+  assert.equal(review.calls(), previousCalls, '恢复后不应残留外观观察器或就绪监听');
+  assert.equal(w.__codexboxSkinSettings, undefined);
+  dom.window.close();
+  console.log(`${platform}：设置 webview 明暗切换、延迟加载、导航、重应用与异步恢复通过`);
+}
+
 function verify26928Surfaces() {
   const fixture = require('./fixtures_skin_26928.cjs');
   const dom = new JSDOM(`<html><head><style>
@@ -212,8 +433,8 @@ async function verify(mode, attribute = 'class') {
   assert(callbacks <= 2, `颜色探针发生循环：${callbacks}`);
   assert.equal(clicks, 1);
   assert(attribute === 'class' ? w.document.documentElement.classList.contains(`electron-${mode}`) : w.document.documentElement.getAttribute(attribute) === mode);
-  w.eval(remover);
-  w.eval(remover);
+  await w.eval(remover);
+  await w.eval(remover);
   assert.equal(w.document.getElementById('codexbar-skin'), null);
   observer.disconnect();
   dom.window.close();
@@ -229,8 +450,18 @@ async function verify(mode, attribute = 'class') {
     css = productionCSS;
     verifyCurrentShell();
     verifyComposerBackdrop();
+    verifySpaceSettingsSurfaces();
+    verifyReviewProfileSurfaces();
+    verifyReviewWorkspaceSurfaces();
     verify26928Surfaces();
     for (const attribute of ['class', 'data-theme']) verifySurfaces(attribute);
+  }
+  const windowsInstaller = JSON.parse(`"${windowsSource.slice(windowsSource.indexOf('pub async fn inject_theme')).match(/"(\(\(\) => .*?)",\n\s*encoded/)[1]}"`)
+    .replace(/\{\{/g, '{').replace(/\}\}/g, '}')
+    .replace('{}', Buffer.from('body { --test: 1; }').toString('base64')).replace('{}', settingsScript);
+  const windowsRemover = JSON.parse(`"${windowsSource.slice(windowsSource.indexOf('pub async fn remove_skin')).match(/let script = "([^"]+)"/)[1]}"`);
+  for (const [platform, install, remove] of [['macOS', installer, remover], ['Windows', windowsInstaller, windowsRemover]]) {
+    await verifySettingsWebviews(platform, install, remove);
   }
   for (const attribute of ['class', 'data-theme']) {
     await verify('light', attribute);
