@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('../windows/node_modules/jsdom');
-const source = fs.readFileSync(path.join(__dirname, '../codexBar/Services/CodexSkinInjectionService.swift'), 'utf8');
+// Windows checkout 可能使用 CRLF，先统一源码换行再提取内嵌脚本。
+const readSource = file => fs.readFileSync(path.join(__dirname, file), 'utf8').replace(/\r\n/g, '\n');
+const source = readSource('../codexBar/Services/CodexSkinInjectionService.swift');
 const settingsScript = fs.readFileSync(path.join(__dirname, '../codexBar/Resources/skin-settings-webviews.js'), 'utf8');
 const installer = source.slice(source.indexOf('private static func installerJS')).split('return """')[1].split('"""')[0]
   .replace('\\(encoded)', Buffer.from('body { --test: 1; }').toString('base64'))
@@ -441,7 +443,7 @@ async function verify(mode, attribute = 'class') {
   console.log(`${attribute}/${mode}：颜色探针 ${callbacks} 次，重复换肤、点击、恢复通过`);
 }
 (async () => {
-  const windowsSource = fs.readFileSync(path.join(__dirname, '../windows/src-tauri/src/desktop.rs'), 'utf8');
+  const windowsSource = readSource('../windows/src-tauri/src/desktop.rs');
   const windowsCSS = windowsSource.slice(windowsSource.indexOf('fn build_css('))
     .split('let mut css = format!(')[1].split('r#"')[1].split('"#,')[0]
     .replace('{}', '').replace(/\{\{/g, '{').replace(/\}\}/g, '}');
