@@ -580,6 +580,13 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
   background: none !important;
 }}
 
+/* 新版将 footer 实色层移到子节点，滚动占位渐变改用 CSS Module。
+   按各自宿主限定装饰层，类名只匹配语义前缀以兼容构建哈希变化。 */
+[data-app-shell-main-surface] [data-thread-scroll-footer] > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_surface_"],
+[data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.sticky.bottom-0 > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_fade_"] {
+  background: none !important;
+}
+
 /* dot 内嵌聊天有独立 messaging 底色；消息气泡与附件保持原有语义。 */
 [data-app-shell-main-surface] .messaging-root.messaging-embedded,
 [data-app-shell-main-surface] .messaging-root.messaging-embedded .thread-pane,
