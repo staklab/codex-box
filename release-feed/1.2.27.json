@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "release": {
+    "version": "1.2.27",
+    "publishedAt": "2026-10-22T05:54:21Z",
+    "summary": "修复普通对话与 dot 输入区外围在浅色模式出现白条、深色模式出现黑条的问题",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.27",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.27",
+    "deliveryMode": "guidedDownload",
+    "minimumAutomaticUpdateVersion": "1.1.6",
+    "artifacts": [
+      {
+        "architecture": "universal",
+        "format": "dmg",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.27/codex-box-1.2.27-macOS.dmg",
+        "sha256": "dde754cea3729323332e28c5c4bc230fe8de1d50384fa3bd9d7b7e4de8c68966"
+      }
+    ]
+  }
+}
