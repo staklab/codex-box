@@ -527,6 +527,12 @@ final class CodexSkinInjectionService: ObservableObject {
           border-bottom-color: transparent !important;
         }
 
+        /* dot 输入框新增合成背景层，将实色底板与顶部渐变一起绘制。
+           限定内嵌消息输入区的装饰层，保留输入框表面与滚动占位。 */
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap [data-codex-composer-root] [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_combined_"] {
+          background: none !important;
+        }
+
         /* dot 顶部渐变通过 portal 挂到外壳；26.1007 改用 floatingHeader 类。
            按独有的定位锚点识别新旧装饰层。
            保留头像、通话按钮及其他预览工具栏自己的渐变。 */
