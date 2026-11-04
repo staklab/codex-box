@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.27",
-    "publishedAt": "2026-10-22T05:54:21Z",
-    "summary": "修复普通对话与 dot 输入区外围在浅色模式出现白条、深色模式出现黑条的问题",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.27",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.27",
+    "version": "1.2.28",
+    "publishedAt": "2026-11-04T06:52:41Z",
+    "summary": "兼容新版主题类名，修复聊天区顶部与输入区底部的背景条并恢复输入框玻璃效果",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.28",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.28",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.27/codex-box-1.2.27-macOS.dmg",
-        "sha256": "dde754cea3729323332e28c5c4bc230fe8de1d50384fa3bd9d7b7e4de8c68966"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.28/codex-box-1.2.28-macOS.dmg",
+        "sha256": "10a6bc97b6951fa5e16cc87fc677804d4b0ef0dd4506abf1afacd1b69bf3ae68"
       }
     ]
   }
