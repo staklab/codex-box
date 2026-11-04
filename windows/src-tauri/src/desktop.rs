@@ -477,7 +477,7 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
 :is(.electron-dark, [data-theme='dark']){{--codexbox-scrim:rgba(24,24,24,.52);--codexbox-scrim-2:rgba(20,20,20,.60);--codexbox-skin-glass:rgba(18,20,20,.18)}}
 :is(.electron-light, [data-theme='light']){{--codexbox-scrim:rgba(245,245,247,.62);--codexbox-scrim-2:rgba(240,240,242,.70);--codexbox-skin-glass:rgba(248,250,249,.14)}}
 :root,:is(.electron-dark, [data-theme='dark']),:is(.electron-light, [data-theme='light']){{--wb-surface-primary:var(--codexbox-scrim)!important;--color-background-surface:var(--codexbox-scrim)!important;--wb-surface-secondary:var(--codexbox-scrim-2)!important;--color-background-surface-under:var(--codexbox-scrim-2)!important;{}}}
-.app-shell-left-panel,main.bg-surface,main[class*="_MainContentSurface_"],header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
+.app-shell-left-panel,main.bg-surface,main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),header[class*="h-toolbar"]{{background:transparent!important;border-color:transparent!important;backdrop-filter:none!important}}
 /* 新版窗口将页面底色移到了 frame/page-surface，并在工作区追加背景伪元素。
    只清理外壳底色，保留局部卡片、菜单和输入框自己的表面。 */
 [data-app-shell-frame][data-app-shell-workspace-tab-chrome],
@@ -569,7 +569,7 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
 
 /* 对话底部的装饰渐变随滚动区铺在输入框后方；让这层透出壁纸，
    保留占位高度，保证末条消息仍能滚动到输入框上方。 */
-main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {{
+main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]) [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {{
   background: none !important;
 }}
 
@@ -581,9 +581,9 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
 }}
 
 /* 新版将 footer 实色层移到子节点，滚动占位渐变改用 CSS Module。
-   按各自宿主限定装饰层，类名只匹配语义前缀以兼容构建哈希变化。 */
-[data-app-shell-main-surface] [data-thread-scroll-footer] > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_surface_"],
-[data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.sticky.bottom-0 > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_fade_"] {{
+   按各自宿主限定装饰层，兼容 _名称_哈希 与 名称-哈希 两种类名。 */
+[data-app-shell-main-surface] [data-thread-scroll-footer] > [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_surface_"], [class^="surface-"], [class*=" surface-"]),
+[data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.sticky.bottom-0 > [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_fade_"], [class^="fade-"], [class*=" fade-"]) {{
   background: none !important;
 }}
 
@@ -602,14 +602,14 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
 
 /* dot 输入框新增合成背景层，将实色底板与顶部渐变一起绘制。
    限定内嵌消息输入区的装饰层，保留输入框表面与滚动占位。 */
-[data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap [data-codex-composer-root] [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_combined_"] {{
+[data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap [data-codex-composer-root] [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_combined_"], [class^="combined-"], [class*=" combined-"]) {{
   background: none !important;
 }}
 
 /* dot 顶部渐变通过 portal 挂到外壳；26.1007 改用 floatingHeader 类。
    按独有的定位锚点识别新旧装饰层。
    保留头像、通话按钮及其他预览工具栏自己的渐变。 */
-[aria-hidden="true"][style*="--orbit-messaging-header-"]:is([class*="_background_"], [class*="_floatingHeader_"]) {{
+[aria-hidden="true"][style*="--orbit-messaging-header-"]:is([class*="_background_"], [class^="background-"], [class*=" background-"], [class*="_floatingHeader_"], [class^="floatingHeader-"], [class*=" floatingHeader-"]) {{
   background: none !important;
 }}
 
@@ -642,15 +642,15 @@ main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.abs
   backdrop-filter: none !important;
 }}
 
-[class*="_ComposerLayoutRoot_"],[class*="_ComposerLayoutBody_"]{{background:transparent!important}}
-:is(.electron-light, [data-theme='light']) [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
-:is(.electron-dark, [data-theme='dark']) [class*="_ComposerLayoutRoot_"]{{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
-[class*="_ComposerLayoutRoot_"].gap-2{{border-radius:25px!important;overflow:hidden!important}}
-[class*="_MainContentTopFade_"]{{display:none!important;background:none!important}}
+:is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]),:is([class*="_ComposerLayoutBody_"], [data-composer-body]){{background:transparent!important}}
+:is(.electron-light, [data-theme='light']) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]){{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
+:is(.electron-dark, [data-theme='dark']) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]){{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
+:is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]).gap-2{{border-radius:25px!important;overflow:hidden!important}}
+:is([class*="_MainContentTopFade_"], [class^="MainContentTopFade-"], [class*=" MainContentTopFade-"]){{display:none!important;background:none!important}}
 .app-shell-left-panel::after{{content:none!important;background:transparent!important}}
-:is(.electron-light, [data-theme='light']) .app-shell-left-panel,:is(.electron-light, [data-theme='light']) main[class*="_MainContentSurface_"],:is(.electron-light, [data-theme='light']) header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
+:is(.electron-light, [data-theme='light']) .app-shell-left-panel,:is(.electron-light, [data-theme='light']) main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),:is(.electron-light, [data-theme='light']) header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}
 :is(.electron-light, [data-theme='light']){{--color-text-primary:#18232b!important;--color-text-secondary:#1c252e!important;--color-text-tertiary:#1c252e!important}}
-:is(.electron-light, [data-theme='light']) [class*="_ComposerLayoutRoot_"]{{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
+:is(.electron-light, [data-theme='light']) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]){{background:rgba(248,250,249,.76)!important;backdrop-filter:none!important}}
 body::after{{content:none!important}}
 "#,
         accents.join("")

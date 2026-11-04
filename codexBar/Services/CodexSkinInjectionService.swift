@@ -390,8 +390,8 @@ final class CodexSkinInjectionService: ObservableObject {
         :is(.electron-dark, [data-theme="dark"]) .app-shell-left-panel,
         :is(.electron-light, [data-theme="light"]) main.bg-surface,
         :is(.electron-dark, [data-theme="dark"]) main.bg-surface,
-        :is(.electron-light, [data-theme="light"]) main[class*="_MainContentSurface_"],
-        :is(.electron-dark, [data-theme="dark"]) main[class*="_MainContentSurface_"],
+        :is(.electron-light, [data-theme="light"]) main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),
+        :is(.electron-dark, [data-theme="dark"]) main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),
         :is(.electron-light, [data-theme="light"]) header.h-toolbar,
         :is(.electron-dark, [data-theme="dark"]) header.h-toolbar,
         :is(.electron-light, [data-theme="light"]) header[class*="h-toolbar"],
@@ -496,7 +496,7 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* 对话底部的装饰渐变随滚动区铺在输入框后方；让这层透出壁纸，
            保留占位高度，保证末条消息仍能滚动到输入框上方。 */
-        main[class*="_MainContentSurface_"] [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {
+        main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]) [aria-hidden="true"].pointer-events-none.absolute.bottom-0.bg-gradient-to-t.from-surface.via-surface {
           background: none !important;
         }
 
@@ -508,9 +508,9 @@ final class CodexSkinInjectionService: ObservableObject {
         }
 
         /* 新版将 footer 实色层移到子节点，滚动占位渐变改用 CSS Module。
-           按各自宿主限定装饰层，类名只匹配语义前缀以兼容构建哈希变化。 */
-        [data-app-shell-main-surface] [data-thread-scroll-footer] > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_surface_"],
-        [data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.sticky.bottom-0 > [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_fade_"] {
+           按各自宿主限定装饰层，兼容 _名称_哈希 与 名称-哈希 两种类名。 */
+        [data-app-shell-main-surface] [data-thread-scroll-footer] > [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_surface_"], [class^="surface-"], [class*=" surface-"]),
+        [data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.sticky.bottom-0 > [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_fade_"], [class^="fade-"], [class*=" fade-"]) {
           background: none !important;
         }
 
@@ -529,14 +529,14 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* dot 输入框新增合成背景层，将实色底板与顶部渐变一起绘制。
            限定内嵌消息输入区的装饰层，保留输入框表面与滚动占位。 */
-        [data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap [data-codex-composer-root] [aria-hidden="true"].pointer-events-none[class*="_background_"][class*="_combined_"] {
+        [data-app-shell-main-surface] .messaging-root.messaging-embedded .composer-wrap [data-codex-composer-root] [aria-hidden="true"].pointer-events-none:is([class*="_background_"], [class^="background-"], [class*=" background-"]):is([class*="_combined_"], [class^="combined-"], [class*=" combined-"]) {
           background: none !important;
         }
 
         /* dot 顶部渐变通过 portal 挂到外壳；26.1007 改用 floatingHeader 类。
            按独有的定位锚点识别新旧装饰层。
            保留头像、通话按钮及其他预览工具栏自己的渐变。 */
-        [aria-hidden="true"][style*="--orbit-messaging-header-"]:is([class*="_background_"], [class*="_floatingHeader_"]) {
+        [aria-hidden="true"][style*="--orbit-messaging-header-"]:is([class*="_background_"], [class^="background-"], [class*=" background-"], [class*="_floatingHeader_"], [class^="floatingHeader-"], [class*=" floatingHeader-"]) {
           background: none !important;
         }
 
@@ -562,21 +562,21 @@ final class CodexSkinInjectionService: ObservableObject {
         }
 
         /* 输入框的硬编码背景、16px 模糊和多层阴影都在 _ComposerLayoutRoot_*，
-           Body 本身已透明。类名带构建哈希，因此统一用子串匹配。 */
-        [class*="_ComposerLayoutRoot_"],
-        [class*="_ComposerLayoutBody_"],
-        [class*="_ComposerLayoutBody_"]::before,
-        [class*="_ComposerLayoutBody_"]::after {
+           Body 本身已透明。优先匹配稳定的 data 标记，同时兼容旧版类名。 */
+        :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]),
+        :is([class*="_ComposerLayoutBody_"], [data-composer-body]),
+        :is([class*="_ComposerLayoutBody_"], [data-composer-body])::before,
+        :is([class*="_ComposerLayoutBody_"], [data-composer-body])::after {
           background: transparent !important;
           -webkit-backdrop-filter: none !important;
           backdrop-filter: none !important;
         }
 
-        [class*="_ComposerLayoutRoot_"] {
+        :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]) {
           box-shadow: 0 0 0 0.5px var(--wb-border) !important;
         }
 
-        :is(.electron-light, [data-theme="light"]) [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-light, [data-theme="light"]) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]) {
           background: rgba(248, 250, 249, 0.28) !important;
           -webkit-backdrop-filter: blur(10px) saturate(0.90) !important;
           backdrop-filter: blur(10px) saturate(0.90) !important;
@@ -584,7 +584,7 @@ final class CodexSkinInjectionService: ObservableObject {
                       0 4px 18px rgba(36, 51, 46, 0.08) !important;
         }
 
-        :is(.electron-dark, [data-theme="dark"]) [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-dark, [data-theme="dark"]) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]) {
           background: rgba(18, 20, 20, 0.16) !important;
           -webkit-backdrop-filter: blur(6px) saturate(0.90) !important;
           backdrop-filter: blur(6px) saturate(0.90) !important;
@@ -594,12 +594,12 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* 新对话首页会给 composer root 追加 gap-2，并把根圆角重置为 0；
            Body 还会额外叠四层阴影。统一回已有对话的圆角玻璃样式。 */
-        [class*="_ComposerLayoutRoot_"].gap-2 {
+        :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]).gap-2 {
           border-radius: 25px !important;
           overflow: hidden !important;
         }
 
-        [class*="_ComposerLayoutRoot_"].gap-2 [class*="_ComposerLayoutBody_"] {
+        :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]).gap-2 :is([class*="_ComposerLayoutBody_"], [data-composer-body]) {
           box-shadow: none !important;
         }
 
@@ -629,7 +629,7 @@ final class CodexSkinInjectionService: ObservableObject {
           --color-text-tertiary: #1c252e !important;
         }
         /* 标题栏、侧栏与主区共用连续的高透表面。 */
-        :is(.electron-light, [data-theme="light"]) main[class*="_MainContentSurface_"],
+        :is(.electron-light, [data-theme="light"]) main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),
         :is(.electron-light, [data-theme="light"]) header.h-toolbar,
         :is(.electron-light, [data-theme="light"]) header[class*="h-toolbar"],
         :is(.electron-light, [data-theme="light"]) .app-shell-left-panel {
@@ -643,7 +643,7 @@ final class CodexSkinInjectionService: ObservableObject {
         :is(.electron-light, [data-theme="light"]) .app-shell-left-panel {
           text-shadow: none !important;
         }
-        :is(.electron-light, [data-theme="light"]) [class*="_ComposerLayoutRoot_"] {
+        :is(.electron-light, [data-theme="light"]) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]) {
           background: rgba(248, 250, 249, 0.76) !important;
         }
         :is(.electron-light, [data-theme="light"]) [role="menu"],
@@ -669,7 +669,7 @@ final class CodexSkinInjectionService: ObservableObject {
 
         /* Codex 在主内容 y=46 下方叠一层 16px surface 渐变；浅色呈白条，
            深色呈黑灰条。两种模式都直接移除。 */
-        [class*="_MainContentTopFade_"] {
+        :is([class*="_MainContentTopFade_"], [class^="MainContentTopFade-"], [class*=" MainContentTopFade-"]) {
           display: none !important;
           background: none !important;
         }

@@ -102,6 +102,45 @@ function verifyComposerBackdrop() {
   dom.window.close();
   console.log('输入框外围透明、滚动占位、玻璃底与内容卡片隔离通过');
 }
+// 新版 CSS Module 类名采用“名称-哈希”，输入框另有稳定 data 标记。
+function verifyRenamedConversationSurfaces() {
+  const dom = new JSDOM(`<html><head><style>
+    .paint { background: white; background-image: linear-gradient(white, transparent); }
+  </style><style>${css}</style></head><body>
+    <main data-app-shell-main-surface="default" class="outline-none MainContentSurface-EnuIYE">
+      <div id="top" aria-hidden="true" class="MainContentTopFade-T6W4RS background-j0etS7 paint"></div>
+      <div id="spacer" aria-hidden="true" class="pointer-events-none sticky bottom-0" style="height:114px">
+        <div id="fade" aria-hidden="true" class="pointer-events-none background-uNUrfY fade-AcMqqj paint"></div>
+      </div>
+      <div data-thread-scroll-footer="true" style="height:114px">
+        <div id="surface" aria-hidden="true" class="background-uNUrfY surface-nr8PSS pointer-events-none paint"></div>
+        <div id="composer" data-composer-layout="multiline" data-composer-surface-variant="default" class="ComposerLayoutRoot-XCKS7O paint">
+          <div id="body" data-composer-body class="ComposerLayoutBody-uBBf1A paint"></div>
+        </div>
+      </div>
+      <div class="messaging-root messaging-embedded"><div class="composer-wrap"><div data-codex-composer-root>
+        <div id="dot" aria-hidden="true" class="pointer-events-none background-new combined-new paint"></div>
+      </div></div></div>
+      <div id="preview" aria-hidden="true" class="background-uNUrfY surface-nr8PSS pointer-events-none paint"></div>
+    </main>
+  </body></html>`);
+  const w = dom.window;
+  for (const mode of ['light', 'dark', 'light']) {
+    w.document.documentElement.setAttribute('data-theme', mode);
+    for (const id of ['top', 'fade', 'surface', 'dot', 'body']) {
+      const style = w.getComputedStyle(w.document.getElementById(id));
+      assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', `${mode}/${id} 新版背景层应透明`);
+      assert.equal(style.backgroundImage || 'none', 'none', `${mode}/${id} 新版装饰渐变应移除`);
+    }
+    assert.equal(w.getComputedStyle(w.document.getElementById('top')).display, 'none');
+    assert.equal(w.getComputedStyle(w.document.getElementById('composer')).backgroundColor,
+      mode === 'light' ? 'rgba(248, 250, 249, 0.76)' : 'rgba(18, 20, 20, 0.16)');
+    assert.equal(w.getComputedStyle(w.document.getElementById('spacer')).height, '114px');
+    assert.equal(w.getComputedStyle(w.document.getElementById('preview')).backgroundColor, 'rgb(255, 255, 255)', '相同类名的局部预览不应变透明');
+  }
+  dom.window.close();
+  console.log('新版类名：顶部渐变、底部遮罩、dot、输入框及外观切换通过');
+}
 function verifySpaceSettingsSurfaces() {
   const fixture = require('./fixtures_skin_space_settings.cjs');
   const dom = new JSDOM(`<html><head><style>
@@ -452,6 +491,7 @@ async function verify(mode, attribute = 'class') {
     css = productionCSS;
     verifyCurrentShell();
     verifyComposerBackdrop();
+    verifyRenamedConversationSurfaces();
     verifySpaceSettingsSurfaces();
     verifyReviewProfileSurfaces();
     verifyReviewWorkspaceSurfaces();
