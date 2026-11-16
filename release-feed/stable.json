@@ -2,19 +2,19 @@
   "schemaVersion": 1,
   "channel": "stable",
   "release": {
-    "version": "1.2.28",
-    "publishedAt": "2026-11-04T06:52:41Z",
-    "summary": "兼容新版主题类名，修复聊天区顶部与输入区底部的背景条并恢复输入框玻璃效果",
-    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.28",
-    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.28",
+    "version": "1.2.29",
+    "publishedAt": "2026-11-16T09:00:03Z",
+    "summary": "修复新版输入区外层伪元素造成的深色黑框与浅色白框，保留输入框和滚动布局",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.29",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.29",
     "deliveryMode": "guidedDownload",
     "minimumAutomaticUpdateVersion": "1.1.6",
     "artifacts": [
       {
         "architecture": "universal",
         "format": "dmg",
-        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.28/codex-box-1.2.28-macOS.dmg",
-        "sha256": "10a6bc97b6951fa5e16cc87fc677804d4b0ef0dd4506abf1afacd1b69bf3ae68"
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.29/codex-box-1.2.29-macOS.dmg",
+        "sha256": "ac33f86bd2a6af60efa940c41c9e44f51f70048b75b9fe8f5927a5a818abc303"
       }
     ]
   }
