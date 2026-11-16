@@ -587,6 +587,14 @@ main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]) [aria-hi
   background: none !important;
 }}
 
+/* 新版将 footer 标记下移到内容子节点，外层通过伪元素绘制渐变与实色底。
+   用直属 footer 标记定位装饰宿主，保留伪元素尺寸、底部留白和滚动布局。 */
+[data-app-shell-main-surface] .pointer-events-none:has(> [data-thread-scroll-footer]),
+[data-app-shell-main-surface] .pointer-events-none:has(> [data-thread-scroll-footer])::before,
+[data-app-shell-main-surface] .pointer-events-none:has(> [data-thread-scroll-footer])::after {{
+  background: none !important;
+}}
+
 /* dot 内嵌聊天有独立 messaging 底色；消息气泡与附件保持原有语义。 */
 [data-app-shell-main-surface] .messaging-root.messaging-embedded,
 [data-app-shell-main-surface] .messaging-root.messaging-embedded .thread-pane,
