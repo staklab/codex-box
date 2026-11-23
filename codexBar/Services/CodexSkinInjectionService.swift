@@ -406,6 +406,7 @@ final class CodexSkinInjectionService: ObservableObject {
            只清理外壳底色，保留局部卡片、菜单和输入框自己的表面。 */
         [data-app-shell-frame][data-app-shell-workspace-tab-chrome],
         [data-app-shell-page-surface="true"],
+        [data-app-shell-surface-backing],
         [data-app-shell-main-surface],
         [data-app-shell-main-titlebar],
         [data-app-shell-left-panel-appearance],
@@ -675,8 +676,8 @@ final class CodexSkinInjectionService: ObservableObject {
           content: none !important;
         }
 
-        /* Codex 在主内容 y=46 下方叠一层 16px surface 渐变；浅色呈白条，
-           深色呈黑灰条。两种模式都直接移除。 */
+        /* 主区顶部装饰层在旧版使用 CSS Module，新版通过主题变量绘制渐变。 */
+        [data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.top-0[class*="bg-[image:var(--app-shell-content-fade,"],
         :is([class*="_MainContentTopFade_"], [class^="MainContentTopFade-"], [class*=" MainContentTopFade-"]) {
           display: none !important;
           background: none !important;

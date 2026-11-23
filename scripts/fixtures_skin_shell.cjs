@@ -10,6 +10,7 @@ module.exports = `
     </div></div>
   </aside>
   <div data-app-shell-unified-tab-strip="true">
+    <div id="surface-backing" data-app-shell-surface-backing class="pointer-events-none bg-surface"></div>
     <main id="main" data-app-shell-main-surface="default" class="_MainContentSurface_gs442_2">
       <div id="workspace" class="_WorkspaceContent_gs442_2">
         <header id="titlebar" data-app-shell-main-titlebar="true">常规</header>

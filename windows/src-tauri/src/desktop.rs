@@ -482,6 +482,7 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
    只清理外壳底色，保留局部卡片、菜单和输入框自己的表面。 */
 [data-app-shell-frame][data-app-shell-workspace-tab-chrome],
 [data-app-shell-page-surface="true"],
+[data-app-shell-surface-backing],
 [data-app-shell-main-surface],
 [data-app-shell-main-titlebar],
 [data-app-shell-left-panel-appearance],
@@ -654,6 +655,7 @@ main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]) [aria-hi
 :is(.electron-light, [data-theme='light']) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]){{background:rgba(248,250,249,.28)!important;backdrop-filter:blur(10px) saturate(.9)!important}}
 :is(.electron-dark, [data-theme='dark']) :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]){{background:rgba(18,20,20,.16)!important;backdrop-filter:blur(6px) saturate(.9)!important}}
 :is([class*="_ComposerLayoutRoot_"], [data-composer-surface-variant][data-composer-layout]).gap-2{{border-radius:25px!important;overflow:hidden!important}}
+[data-app-shell-main-surface] [aria-hidden="true"].pointer-events-none.top-0[class*="bg-[image:var(--app-shell-content-fade,"],
 :is([class*="_MainContentTopFade_"], [class^="MainContentTopFade-"], [class*=" MainContentTopFade-"]){{display:none!important;background:none!important}}
 .app-shell-left-panel::after{{content:none!important;background:transparent!important}}
 :is(.electron-light, [data-theme='light']) .app-shell-left-panel,:is(.electron-light, [data-theme='light']) main:is([class*="_MainContentSurface_"], [data-app-shell-main-surface]),:is(.electron-light, [data-theme='light']) header[class*="h-toolbar"]{{background:rgba(248,250,249,.10)!important;text-shadow:none!important}}

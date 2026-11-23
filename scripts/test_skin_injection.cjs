@@ -31,7 +31,7 @@ function verifySurfaces(attribute) {
 function verifyCurrentShell() {
   const fixture = require('./fixtures_skin_shell.cjs');
   const dom = new JSDOM(`<html><head><style>
-    [data-app-shell-frame], [data-app-shell-main-surface], [data-app-shell-main-titlebar],
+    [data-app-shell-frame], [data-app-shell-surface-backing], [data-app-shell-main-surface], [data-app-shell-main-titlebar],
     [class~="electron:bg-surface"], .bg-surface-secondary { background: rgb(24, 24, 24); }
     ._PageSurfaceLayout_gs442_2 ._LeftPanel_gs442_2 .sidebar-navigation { background: rgba(24, 24, 24, 0.65); }
     [class~="bg-surface-secondary/40"] { background: rgba(240, 240, 240, 0.4); }
@@ -41,7 +41,7 @@ function verifyCurrentShell() {
   const w = dom.window;
   for (const mode of ['light', 'dark', 'light']) {
     w.document.documentElement.setAttribute('data-theme', mode);
-    for (const id of ['frame', 'titlebar', 'settings', 'app-shell-sidebar', 'sidebar', 'usage-toolbar', 'shortcut-toolbar', 'search-field']) {
+    for (const id of ['frame', 'surface-backing', 'titlebar', 'settings', 'app-shell-sidebar', 'sidebar', 'usage-toolbar', 'shortcut-toolbar', 'search-field']) {
       assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
         'rgba(0, 0, 0, 0)', `${mode}/${id} 新版页面背景应透明`);
     }
@@ -108,6 +108,7 @@ function verifyRenamedConversationSurfaces() {
     .paint { background: white; background-image: linear-gradient(white, transparent); }
   </style><style>${css}</style></head><body>
     <main data-app-shell-main-surface="default" class="outline-none MainContentSurface-EnuIYE">
+      <div id="toolbar-fade" aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 bg-[image:var(--app-shell-content-fade,linear-gradient(to_bottom,currentColor,transparent))] paint"></div>
       <div id="top" aria-hidden="true" class="MainContentTopFade-T6W4RS background-j0etS7 paint"></div>
       <div id="spacer" aria-hidden="true" class="pointer-events-none sticky bottom-0" style="height:114px">
         <div id="fade" aria-hidden="true" class="pointer-events-none background-uNUrfY fade-AcMqqj paint"></div>
@@ -127,7 +128,7 @@ function verifyRenamedConversationSurfaces() {
   const w = dom.window;
   for (const mode of ['light', 'dark', 'light']) {
     w.document.documentElement.setAttribute('data-theme', mode);
-    for (const id of ['top', 'fade', 'surface', 'dot', 'body']) {
+    for (const id of ['top', 'toolbar-fade', 'fade', 'surface', 'dot', 'body']) {
       const style = w.getComputedStyle(w.document.getElementById(id));
       assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', `${mode}/${id} 新版背景层应透明`);
       assert.equal(style.backgroundImage || 'none', 'none', `${mode}/${id} 新版装饰渐变应移除`);
