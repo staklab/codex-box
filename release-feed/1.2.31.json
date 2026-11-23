@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "release": {
+    "version": "1.2.31",
+    "publishedAt": "2026-11-23T09:51:23Z",
+    "summary": "修复资料空间标题栏及文件预览区的白底，保留电子表格单元格底色",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.31",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.31",
+    "deliveryMode": "guidedDownload",
+    "minimumAutomaticUpdateVersion": "1.1.6",
+    "artifacts": [
+      {
+        "architecture": "universal",
+        "format": "dmg",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.31/codex-box-1.2.31-macOS.dmg",
+        "sha256": "2a9c260a642b51fd452df3a9e11be3e327af1f55ad3d8ea9c56881ed3be83dfd"
+      }
+    ]
+  }
+}
