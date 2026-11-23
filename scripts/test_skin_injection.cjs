@@ -145,7 +145,7 @@ function verifyRenamedConversationSurfaces() {
 function verifySpaceSettingsSurfaces() {
   const fixture = require('./fixtures_skin_space_settings.cjs');
   const dom = new JSDOM(`<html><head><style>
-    .bg-surface, [class~="electron:bg-surface"], .bg-surface-card,
+    .bg-surface, [class~="electron:bg-surface"], .bg-surface-card, .bg-token-bg-primary,
     [class~="bg-surface-secondary/92"], [class~="dark:bg-surface-secondary/92"],
     [class~="bg-(--color-background-primary-soft-alpha)/50"] { background: rgb(255,255,255); }
     .settings-row { border-bottom: 1px solid gray; }
@@ -162,7 +162,7 @@ function verifySpaceSettingsSurfaces() {
       w.document.querySelector('head style:last-child').textContent = css.replaceAll('var(--codexbox-skin-glass)', glass);
       const normalizedGlass = w.document.createElement('div').style;
       normalizedGlass.backgroundColor = glass;
-      for (const id of ['sites-page', 'sites-content', 'sites-tabpanel', 'space-toolbar', 'settings-page']) {
+      for (const id of ['sites-page', 'sites-content', 'sites-tabpanel', 'space-toolbar', 'settings-page', 'file-page', 'file-preview', 'workbook', 'workbook-surface', 'formula-bar', 'pages-bar']) {
         assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
           'rgba(0, 0, 0, 0)', `${attribute}/${mode}/${id} 空间页面层应透明`);
       }
@@ -173,7 +173,7 @@ function verifySpaceSettingsSurfaces() {
           normalizedGlass.backgroundColor, `${attribute}/${mode}/${id} 设置分组应使用模式玻璃底`);
       }
       // jsdom 不计算内联 var 的级联，默认分组的最终背景及标题伪元素另用浏览器验证。
-      for (const id of ['site-card', 'site-thumbnail', 'settings-preview']) {
+      for (const id of ['site-card', 'site-thumbnail', 'settings-preview', 'sheet', 'other-panel']) {
         assert.equal(w.getComputedStyle(w.document.getElementById(id)).backgroundColor,
           'rgb(255, 255, 255)', `${id} 内容预览应保持原有表面`);
       }
@@ -185,6 +185,17 @@ function verifySpaceSettingsSurfaces() {
       assert.equal(w.getComputedStyle(w.document.getElementById('ordinary-inline-group')).getPropertyValue('--color-background-panel'), '', '普通分组不应套用设置变量');
     }
   }
+  // jsdom 无法渲染伪元素，直接验证新旧标题 DOM 都匹配清除伪元素背景的生产规则。
+  const header = w.document.getElementById('space-header');
+  const headerSelectors = Array.from(w.document.styleSheets[1].cssRules)
+    .filter(rule => rule.style?.background === 'transparent')
+    .flatMap(rule => (rule.selectorText || '').split(/,\s*(?=\[data-app-shell-main-surface\])/))
+    .filter(selector => selector.includes('[data-app-shell-inline-page-header]') && selector.endsWith('::before'));
+  header.className = 'shell-newhash';
+  assert.ok(headerSelectors.some(selector => header.matches(selector.slice(0, -'::before'.length))), '新版资料空间标题应透出壁纸');
+  header.className = '_shell_oldhash_2';
+  header.removeAttribute('data-expand-search');
+  assert.ok(headerSelectors.some(selector => header.matches(selector.slice(0, -'::before'.length))), '旧版空间标题仍应透明');
   let clicks = 0;
   for (const id of ['create-site', 'settings-toggle', 'export-data']) {
     const button = w.document.getElementById(id);

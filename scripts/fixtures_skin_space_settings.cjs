@@ -43,6 +43,23 @@ module.exports = `
     <div id="ordinary-inline-group" class="flex flex-col rounded-2xl" style="background-color:var(--color-background-panel, var(--color-background-primary-soft-alpha))">普通卡片</div>
     <div id="ordinary-shell" class="_shell_other_2" data-sticky="true">其他模块</div>
   </div>
+<div data-app-shell-tab-panel-controller="right" data-tab-id="spaces-file-example">
+  <div id="file-page" class="relative flex h-full min-h-0 flex-col bg-surface">
+    <div class="min-h-0 flex-1"><div class="min-h-0 h-full">
+      <section id="file-preview" class="relative flex h-full min-h-0 flex-col bg-surface"><button>下载文件</button></section>
+    </div></div>
+  </div>
+</div>
+<div data-app-shell-tab-panel-controller="right" data-tab-id="spaces-file-workbook">
+  <section id="workbook" data-codex-popcorn-editor class="bg-token-bg-primary">
+    <div id="workbook-surface" data-artifact-search-surface class="bg-token-bg-primary">
+      <div id="formula-bar" data-testid="popcorn-formula-bar" class="bg-token-bg-primary"></div>
+      <canvas id="sheet" class="bg-token-bg-primary"></canvas>
+      <div id="pages-bar" data-testid="popcorn-pages-bar" class="bg-token-bg-primary"></div>
+    </div>
+  </section>
+</div>
+<div data-app-shell-tab-panel-controller="right" data-tab-id="other"><div id="other-panel" class="h-full flex-col bg-surface"></div></div>
 </main>
 <div id="space-menu" role="menu" class="bg-surface">菜单</div>
 <div id="space-dialog" role="dialog" class="bg-surface">确认窗口</div>`;

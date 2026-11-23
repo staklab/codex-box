@@ -503,9 +503,17 @@ fn build_css(colors: &ThemeColors, directory: &Path) -> anyhow::Result<String> {
    按页面布局限定背景层，网站缩略图、内容预览和控件继续使用原有表面。 */
 [data-app-shell-main-surface] .flex.h-full.min-h-0.flex-col.bg-surface:has([data-app-shell-inline-page-header]),
 [data-app-shell-main-surface] [data-app-shell-inline-page-header] .mx-auto.flex.w-full.flex-1.flex-col.bg-surface:is(.min-h-0, .min-h-full),
-[data-app-shell-main-surface] [data-app-shell-inline-page-header] [data-sticky][class*="_shell_"]::before,
+[data-app-shell-main-surface] [data-app-shell-inline-page-header] [data-sticky]:is([data-expand-search], [class*="_shell_"])::before,
 [data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface,
 [data-app-shell-main-surface] [data-app-shell-inline-page-header] .sticky.z-30.bg-surface::after {{
+  background: transparent !important;
+}}
+
+/* 资料空间的文件标签单独绘制页面和预览底板。表格画布及文档内容保留自身底色。 */
+[data-app-shell-tab-panel-controller][data-tab-id^="spaces-file-"] > .h-full.flex-col.bg-surface,
+[data-app-shell-tab-panel-controller][data-tab-id^="spaces-file-"] > .h-full.flex-col.bg-surface > .flex-1 > .h-full > section.h-full.bg-surface,
+[data-app-shell-tab-panel-controller][data-tab-id^="spaces-file-"] :is([data-codex-popcorn-editor], [data-artifact-search-surface]).bg-token-bg-primary,
+[data-app-shell-tab-panel-controller][data-tab-id^="spaces-file-"] :is([data-testid="popcorn-formula-bar"], [data-testid="popcorn-pages-bar"]).bg-token-bg-primary {{
   background: transparent !important;
 }}
 
