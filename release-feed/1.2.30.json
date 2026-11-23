@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "release": {
+    "version": "1.2.30",
+    "publishedAt": "2026-11-23T01:53:56Z",
+    "summary": "修复聊天区背景与顶部色条，使壁纸在深浅模式下连续显示到标题栏",
+    "releaseNotesURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.30",
+    "downloadPageURL": "https://github.com/staklab/codex-box/releases/tag/v1.2.30",
+    "deliveryMode": "guidedDownload",
+    "minimumAutomaticUpdateVersion": "1.1.6",
+    "artifacts": [
+      {
+        "architecture": "universal",
+        "format": "dmg",
+        "downloadURL": "https://github.com/staklab/codex-box/releases/download/v1.2.30/codex-box-1.2.30-macOS.dmg",
+        "sha256": "01a5c25072be53de6ca293f30c169dac852ed17d38aa66a2224c75f88548ecef"
+      }
+    ]
+  }
+}
